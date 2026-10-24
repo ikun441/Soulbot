@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f4d5e3"><title>SoulBot · 让陪伴有自己的模样</title>
+<link rel="icon" href="/static/assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/css/layout.css">
+<link rel="stylesheet" href="/static/css/motion.css">
+<script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+<div id="wallpaper" aria-hidden="true"></div><div class="ambient ambient-one" aria-hidden="true"></div><div class="ambient ambient-two" aria-hidden="true"></div>
+<div class="app-shell">
+<aside class="sidebar glass">
+<a class="brand" href="#dashboard"><img src="/static/assets/icon.svg" alt="" width="42" height="42"><span>SoulBot<small>YOUR LITTLE UNIVERSE</small></span></a>
+<div class="workspace"><span class="tiny-dot"></span> 我的 AI 伙伴 <span class="workspace-label">本地空间</span></div>
+<p class="nav-label">工作空间</p><nav id="navigation" aria-label="主导航"></nav>
+<div class="sidebar-bottom"><div class="flower-mark" aria-hidden="true">✳</div><p>每一种个性，都值得被珍藏。</p><span id="side-version">正在连接…</span></div>
+</aside>
+<div class="main-shell">
+<header class="topbar"><div class="breadcrumb">我的空间 <span>/</span> <strong id="breadcrumb">开始</strong></div><div class="top-actions"><span class="local-pill"><i></i> 本地管理</span><button id="logout" class="button quiet small" hidden>退出登录</button></div></header>
+<main id="main" tabindex="-1"><p class="loading">正在打开你的小小宇宙…</p></main>
+<footer>SOULBOT <span>·</span> 有边界的自由，有温度的表达。<span id="footer-version"></span></footer>
+</div>
+</div>
+<div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+<dialog id="confirm-dialog"><h2 id="confirm-title">确认操作</h2><p id="confirm-text"></p><div class="actions"><button class="button quiet" id="confirm-cancel">取消</button><button class="button primary" id="confirm-ok">确认恢复</button></div></dialog>
+</body></html>

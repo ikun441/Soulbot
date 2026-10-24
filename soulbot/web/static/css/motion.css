@@ -1,0 +1,49 @@
+/* Motion follows user settings; form interaction never waits for it. */
+:root{--motion-ease:cubic-bezier(.16,1,.3,1);--motion-spring:cubic-bezier(.22,1.35,.5,1)}
+html{view-transition-name:none}main{view-transition-name:soulbot-page}
+::view-transition-group(soulbot-page){animation-duration:360ms;animation-timing-function:var(--motion-ease)}
+::view-transition-old(soulbot-page){animation:page-out 180ms ease both}
+::view-transition-new(soulbot-page){animation:page-in 380ms var(--motion-ease) both}
+::view-transition{pointer-events:none}
+html[data-direction=backward]::view-transition-old(soulbot-page){animation-name:page-out-back}
+html[data-direction=backward]::view-transition-new(soulbot-page){animation-name:page-in-back}
+@keyframes page-out{to{opacity:0;transform:translateX(-18px) scale(.99)}}
+@keyframes page-in{from{opacity:0;transform:translateX(26px) scale(.99)}to{opacity:1;transform:translateX(0) scale(1)}}
+@keyframes page-out-back{to{opacity:0;transform:translateX(18px) scale(.99)}}
+@keyframes page-in-back{from{opacity:0;transform:translateX(-26px) scale(.99)}to{opacity:1;transform:translateX(0) scale(1)}}
+#navigation{position:relative;isolation:isolate}.nav-link{position:relative;z-index:1}.nav-marker{position:absolute;border-radius:12px;background:linear-gradient(100deg,#edc8dd,#eee0ef);box-shadow:inset 0 0 0 1px #dcb1cc;pointer-events:none;z-index:0;transform-origin:top left}.nav-link.active{background:transparent;box-shadow:none}.nav-link.active:hover{background:transparent}
+body[data-motion=true] .button{position:relative;overflow:hidden;transition:transform 220ms var(--motion-spring),box-shadow 220ms ease,background 180ms ease}
+body[data-motion=true] .button:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 22px #a4407422}
+body[data-motion=true] .button:active:not(:disabled){transform:translateY(0) scale(.97)}
+.click-ripple{position:absolute;border-radius:50%;background:currentColor;pointer-events:none}
+body[data-motion=true] .button svg{transition:transform 240ms var(--motion-spring)}
+body[data-motion=true] .button:hover svg{transform:translateX(3px)}
+.button[aria-busy=true]:before{content:"";width:12px;height:12px;flex-shrink:0;border:2px solid currentColor;border-right-color:transparent;border-radius:50%}
+body[data-motion=true] .button[aria-busy=true]:before{animation:busy-spin 700ms linear infinite}
+@keyframes busy-spin{to{transform:rotate(360deg)}}
+body[data-motion=true] .metric{transition:transform 320ms var(--motion-ease),box-shadow 320ms ease,border-color 240ms ease}
+body[data-motion=true] .metric:hover{transform:translateY(-5px);box-shadow:0 18px 40px #a45d8820;border-color:#d9a5c4}
+body[data-motion=true] .metric-icon,body[data-motion=true] .feature-icon{transition:transform 300ms var(--motion-spring),background 220ms ease}
+body[data-motion=true] .metric:hover .metric-icon{transform:rotate(-8deg) scale(1.1);background:#efd0e3}
+body[data-motion=true] .row:hover .feature-icon{transform:scale(1.07)}
+body[data-motion=true] input,body[data-motion=true] textarea,body[data-motion=true] select{transition:box-shadow 200ms ease,border-color 200ms ease,background 200ms ease}
+input:focus,textarea:focus,select:focus{border-color:#b96b99;box-shadow:0 0 0 4px #bc7fa414;background:#fffd}
+.switch-row input{appearance:none;-webkit-appearance:none;width:42px;height:24px;min-height:24px;padding:0;border:1px solid #c9adc1;border-radius:20px;background:#dac9d6;cursor:pointer;position:relative}
+.switch-row input:before{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #64425925}
+.switch-row input:checked{background:#b15888;border-color:#b15888}.switch-row input:checked:before{transform:translateX(18px)}
+body[data-motion=true] .switch-row input:before{transition:transform 300ms var(--motion-spring)}
+body[data-motion=true] .switch-row input{transition:background 200ms ease,border-color 200ms ease}
+body[data-motion=true] .step-dot{transition:background 280ms ease,color 280ms ease,box-shadow 280ms ease}
+.step-dot.current{box-shadow:0 3px 12px #aa60871a}
+body[data-motion=true] .hero:after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(110deg,transparent 20%,#fff5 45%,transparent 65%);transform:translateX(-110%);animation:glass-light 12s ease-in-out infinite}
+@keyframes glass-light{0%,65%{transform:translateX(-110%)}90%,100%{transform:translateX(110%)}}
+body[data-motion=true] .orbit{animation:orbit-turn 32s linear infinite}
+@keyframes orbit-turn{from{transform:rotate(-30deg)}to{transform:rotate(330deg)}}
+body[data-motion=true] .spark{animation:spark-breathe 3.4s ease-in-out infinite alternate}
+body[data-motion=true] .spark.s2{animation-delay:1.2s}
+@keyframes spark-breathe{from{opacity:.4;transform:scale(.8) rotate(-8deg)}to{opacity:1;transform:scale(1.15) rotate(8deg)}}
+#wallpaper img,#wallpaper video{position:absolute;inset:0}
+body[data-motion=false] *,body[data-motion=false] *:before,body[data-motion=false] *:after{animation:none!important;transition:none!important}
+body[data-motion=false]::view-transition-old(soulbot-page),body[data-motion=false]::view-transition-new(soulbot-page){animation:none!important}
+@media(hover:none){body[data-motion=true] .metric:hover{transform:none;box-shadow:var(--shadow)}}
+@media(prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
