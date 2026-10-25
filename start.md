@@ -1,6 +1,6 @@
 # SoulBot 小白启动指南
 
-当前版本：v0.3.0（M2 首个增量）。配置 NapCat 和 LLM 后可使用 QQ 文本和媒体工具；本地 Emoji、真实 meme-generator 已接入，语音、云生图、HTML 卡片和长期记忆继续开发。
+当前版本：v0.5.0。配置 NapCat 和 LLM 后可使用 QQ 文本和媒体工具；Emoji、真实 meme-generator 与三个可选模板扩展仓库已接入。支持通过 `.env` 保存和应用登录账号与反向 WS 地址；语音、云生图、HTML 卡片和长期记忆继续开发。
 
 ## 1. 准备什么
 
@@ -52,6 +52,8 @@ SOULBOT_PYTHON=/你安装的Python路径/python3.11 bash start.sh
 
 第一次会进入八步向导：欢迎 → 管理员 → QQ → AI → 人格 → 多模态 → 权限 → 检查。管理员密码至少 12 位，建议使用密码管理器。点击下一步会安全保存配置；重新打开页面后登录即可继续。选配项目可以留空。
 
+也可以在首次启动前通过 `.env` 预设账号。已有账号会自动补存用户名和密码哈希；“登录账号”页可以修改。详见 [.env 配置说明](docs/environment.md)。
+
 不要把 API Key 填进自我介绍或人格 Prompt，使用专门的密码输入框。前端不使用浏览器持久存储保存密钥。
 
 ## 5. NapCat 安装与 QQ 接入
@@ -62,7 +64,7 @@ NapCat 是登录 QQ 并提供 OneBot 协议的独立程序；SoulBot 是接收�
 2. 在文档的“安装方式”选择适合系统的方式（Shell 或 Framework），按当前官方步骤安装 QQ 依赖和 NapCat。不要把其它人发来的未知安装脚本直接运行。
 3. 按官方说明启动 NapCat，打开它自己的 WebUI，扫码登录你的机器人 QQ。NapCat 的 WebUI 登录信息与 SoulBot 管理员无关。
 4. 在 SoulBot 的“QQ 连接”保留“反向 WebSocket”。自己设置一个随机 Access Token，在 SoulBot 中保存。
-5. 在 NapCat 网络配置中添加 **WebSocket 客户端 / 反向 WebSocket**，填写：`ws://127.0.0.1:2526/onebot/v11/ws`，并填入同一 Token，保存、启用。
+5. 在 NapCat 网络配置中添加 **WebSocket 客户端 / 反向 WebSocket**，填写 QQ 页面显示的反向地址（默认 `ws://127.0.0.1:2526/onebot/v11/ws`），并填入同一 Token，保存、启用。自定义或反代地址可在 QQ 页面保存到 `.env`，也可设置 `SOULBOT_ONEBOT_REVERSE_WS_URL` 后重启。
 6. 在 SoulBot 启用 QQ 适配器，保存后按 Ctrl+C 停止，再运行启动脚本。两个程序在同一台机器时使用 127.0.0.1。
 7. 重启 SoulBot 后查看仪表盘 QQ 状态；在 QQ 设置页可以确认连接，并在确认提示后向主人 QQ 发送一条测试消息。测试发送每分钟最多一次。
 
@@ -124,4 +126,4 @@ WebUI 的“导出脱敏配置”只导出非敏感设置，不含密钥与主�
 
 ## 12. 忘记管理员密码
 
-当前未提供自助重置入口。请保留原 data 备份，联系本机维护者离线重置管理员与会话；不要把整个数据库发到公开渠道。不要删除数据库，这会丢失状态。
+停止 SoulBot，在现有 `.env` 中设置 `SOULBOT_WEBUI_USERNAME` 和新的 `SOULBOT_WEBUI_PASSWORD`（至少 12 位），再启动并用新密码登录。启动时会将明文输入转换为密码哈希并删除明文行，旧会话会全部失效。保留原有文件中的其他配置，无需删除数据库。完整示例见 [.env 配置说明](docs/environment.md)。

@@ -1,11 +1,9 @@
 import json
-import os
 from pathlib import Path
 from threading import RLock
 
-from dotenv import dotenv_values
-
 from soulbot.services.config_service import atomic_write
+from soulbot.services.environment_service import EnvironmentService
 
 NAMES = {
     "llm_api_key": "SOULBOT_LLM_API_KEY",
@@ -16,9 +14,9 @@ NAMES = {
 
 
 class SecretService:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, environment=None):
         self.path = root / "data" / "secrets.json"
-        self.environment = dotenv_values(root / ".env")
+        self.environment = environment or EnvironmentService(root)
         self.lock = RLock()
 
     def values(self):
@@ -28,11 +26,7 @@ class SecretService:
 
     def get(self, name):
         env_name = NAMES[name]
-        return (
-            os.environ.get(env_name)
-            or self.environment.get(env_name)
-            or self.values().get(name, "")
-        )
+        return self.environment.get(env_name) or self.values().get(name, "")
 
     def save(self, changes: dict[str, str]):
         if not changes.keys() <= NAMES.keys():

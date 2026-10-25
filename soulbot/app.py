@@ -27,8 +27,10 @@ from soulbot.core.budget import BudgetService
 from soulbot.core.permissions import PermissionEngine
 from soulbot.providers.llm.base import ProviderError
 from soulbot.providers.registry import ProviderRegistry
-from soulbot.services.auth_service import AuthService
+from soulbot.services.auth_service import AccountChange, AuthService
+from soulbot.services.auth_service import AdminAccount as Account
 from soulbot.services.config_service import ConfigService, Model, Settings
+from soulbot.services.environment_service import EnvironmentError, EnvironmentService
 from soulbot.services.llm_service import LLMService
 from soulbot.services.media_service import MediaError, MediaStore
 from soulbot.services.meme_service import MemeService
@@ -39,11 +41,6 @@ from soulbot.tools.media_tools import register_media_tools
 from soulbot.tools.registry import ToolRegistry
 
 STATIC = Path(__file__).parent / "web" / "static"
-
-
-class Account(Model):
-    username: str = Field(min_length=3, max_length=40, pattern=r"^[a-zA-Z0-9_\-]+$")
-    password: SecretStr = Field(min_length=12, max_length=128)
 
 
 class Login(Model):
@@ -88,19 +85,21 @@ def build_services(root):
     root.mkdir(parents=True, exist_ok=True)
     (root / "data").mkdir(exist_ok=True, mode=0o700)
     (root / "logs").mkdir(exist_ok=True)
-    config = ConfigService(root)
+    environment = EnvironmentService(root)
+    config = ConfigService(root, environment)
     db = Database(root / "data" / "soulbot.db")
+    secrets_service = SecretService(root, environment)
     services = Services(
         root,
         config,
-        SecretService(root),
+        secrets_service,
         db,
-        AuthService(db),
+        AuthService(db, environment),
         ProviderRegistry(),
         ToolRegistry(PermissionEngine(), db.audit),
         time.monotonic(),
         config.current.model_copy(deep=True),
-        hashlib.sha256(SecretService(root).get("onebot_access_token").encode()).hexdigest(),
+        hashlib.sha256(secrets_service.get("onebot_access_token").encode()).hexdigest(),
     )
     services.budget = BudgetService(db)
     services.llm = LLMService(
@@ -193,6 +192,10 @@ def create_web_app(root: Path, services=None):
     async def media_error(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=422)
 
+    @app.exception_handler(EnvironmentError)
+    async def environment_error(request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, exc):
         # Pydantic's default response includes input, which can contain credentials.
@@ -236,6 +239,7 @@ def create_web_app(root: Path, services=None):
             "config": s.config.current.model_dump(),
             "secrets": s.secrets.status(),
             "restart_required": restart_required(),
+            "qq_reverse_ws_url": s.config.current.qq.receiver_url(s.config.current.web),
         }
 
     @app.get("/api/bootstrap")
@@ -271,6 +275,25 @@ def create_web_app(root: Path, services=None):
         s.auth.logout(request.cookies.get("soulbot_session"))
         response.delete_cookie("soulbot_session", path="/")
         return {"ok": True}
+
+    @app.get("/api/auth/account", dependencies=[Depends(authorized)])
+    def account():
+        return s.auth.account()
+
+    @app.put("/api/auth/account", dependencies=[Depends(authorized)])
+    def change_account(data: AccountChange, request: Request, response: Response):
+        token = s.auth.change_account(
+            data.username,
+            data.password.get_secret_value() if data.password is not None else None,
+            data.current_password.get_secret_value(),
+            request.client.host,
+        )
+        set_session(response, token, request)
+        return {
+            "ok": True,
+            **s.auth.account(),
+            "message": "账号已保存到 .env 并立即生效，其他登录会话已退出",
+        }
 
     @app.get("/api/config", dependencies=[Depends(authorized)])
     def read_config():
@@ -376,6 +399,7 @@ def create_web_app(root: Path, services=None):
     async def test_qq():
         # Read-only protocol probe. A WS handshake alone is not evidence of OneBot.
         import websockets
+        from websockets.exceptions import WebSocketException
 
         if s.qq_transport and s.qq_transport.connected():
             return await s.qq_transport.status()
@@ -403,7 +427,7 @@ def create_web_app(root: Path, services=None):
                                 if ok
                                 else "OneBot 返回失败状态，请检查 NapCat 登录与 Token",
                             }
-        except (OSError, TimeoutError, ValueError, websockets.exceptions.WebSocketException):
+        except (OSError, TimeoutError, ValueError, WebSocketException):
             return {
                 "ok": False,
                 "message": "未能收到有效 OneBot 响应。请启动 NapCat 并检查端口和 Token；若此地址是反向接收端，应在 NapCat 中填写 SoulBot 的接收地址。",

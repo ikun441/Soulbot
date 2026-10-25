@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import secrets
+from urllib.parse import urlsplit
 
 import nonebot
 from nonebot.adapters.onebot.v11 import (
@@ -86,7 +87,13 @@ class OneBotGate:
         self.app, self.services = app, services
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] in {"websocket", "http"} and scope.get("path", "").startswith("/onebot/"):
+        reverse_path = urlsplit(
+            self.services.running_config.qq.receiver_url(self.services.running_config.web)
+        ).path
+        custom_reverse = scope["type"] == "websocket" and scope.get("path") == reverse_path
+        if scope["type"] in {"websocket", "http"} and (
+            scope.get("path", "").startswith("/onebot/") or custom_reverse
+        ):
             current = getattr(self.services, "config", None)
             if not self.services.running_config.qq.enabled or (
                 current and not current.current.qq.enabled
@@ -97,6 +104,8 @@ class OneBotGate:
                     await send({"type": "http.response.start", "status": 403, "headers": []})
                     await send({"type": "http.response.body", "body": b"QQ adapter disabled"})
                 return
+            if custom_reverse:
+                scope = {**scope, "path": "/onebot/v11/ws", "raw_path": b"/onebot/v11/ws"}
         await self.app(scope, receive, send)
 
 

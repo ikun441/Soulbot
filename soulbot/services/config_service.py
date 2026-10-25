@@ -40,6 +40,36 @@ class QQ(Model):
     enabled: bool = False
     connection: Literal["reverse", "forward"] = "reverse"
     test_url: str = "ws://127.0.0.1:2525/onebot/v11/ws"
+    reverse_ws_url: str = Field(default="", max_length=2048)
+
+    @field_validator("reverse_ws_url")
+    @classmethod
+    def valid_reverse_url(cls, value):
+        from urllib.parse import urlsplit
+
+        if not value:
+            return value
+        cls.valid_url(value)
+        parts = urlsplit(value)
+        if (
+            re.search(r"\s", value)
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)
+            or "//" in parts.path
+            or not re.fullmatch(r"/[a-zA-Z0-9_./\-]+", parts.path)
+            or any(part in {".", "..", ""} for part in parts.path.strip("/").split("/"))
+            or parts.path in {"/api", "/static"}
+            or parts.path.startswith(("/api/", "/static/"))
+        ):
+            raise ValueError(
+                "反向 WS 地址需要有效接收路径，不能包含空白、查询参数或保留的 API 路径"
+            )
+        return value
+
+    def receiver_url(self, web):
+        host = web.host if web.host != "0.0.0.0" else "127.0.0.1"
+        if ":" in host:
+            host = f"[{host}]"
+        return self.reverse_ws_url or f"ws://{host}:{web.port}/onebot/v11/ws"
 
     @field_validator("test_url")
     @classmethod
@@ -309,13 +339,33 @@ def atomic_write(path: Path, content: str, mode=0o600):
 
 
 class ConfigService:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, environment=None):
+        from soulbot.services.environment_service import (
+            REVERSE_WS,
+            EnvironmentError,
+            EnvironmentService,
+        )
+
+        self.environment = environment or EnvironmentService(root)
         self.path = root / "config.yaml"
         self.backup_path = root / "data" / "config.backup.yaml"
         self.lock = RLock()
         if not self.path.exists():
             atomic_write(self.path, self.dump(Settings()))
         self.current = self.read(self.path)
+        file_values = self.environment.values()
+        if REVERSE_WS in os.environ or REVERSE_WS in file_values:
+            reverse = os.environ.get(REVERSE_WS, file_values.get(REVERSE_WS)) or ""
+            data = self.current.model_dump()
+            data["qq"]["reverse_ws_url"] = reverse
+            try:
+                self.current = Settings.model_validate(data)
+            except ValueError:
+                raise EnvironmentError(
+                    "SOULBOT_ONEBOT_REVERSE_WS_URL 无效；请填写带接收路径的 ws:// 或 wss:// 地址，Token 使用独立配置"
+                ) from None
+        if REVERSE_WS not in file_values:
+            self.environment.update({REVERSE_WS: self.current.qq.reverse_ws_url})
 
     @staticmethod
     def dump(settings):
@@ -326,7 +376,13 @@ class ConfigService:
         return Settings.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
 
     def save(self, settings: Settings):
+        from soulbot.services.environment_service import REVERSE_WS, EnvironmentError
+
         with self.lock:
+            override = os.environ.get(REVERSE_WS)
+            if override is not None and settings.qq.reverse_ws_url != override:
+                raise EnvironmentError("反向 WS 地址由进程环境变量管理，请修改该变量并重启")
+            self.environment.update({REVERSE_WS: settings.qq.reverse_ws_url})
             atomic_write(self.backup_path, self.dump(self.current))
             atomic_write(self.path, self.dump(settings))
             self.current = settings.model_copy(deep=True)

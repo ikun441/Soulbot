@@ -5,6 +5,7 @@ import yaml
 
 from soulbot.adapters.onebot_v11 import create_runtime
 from soulbot.app import build_services
+from soulbot.services.environment_service import EnvironmentError
 
 
 def main():
@@ -27,6 +28,9 @@ def main():
         server.run()
     except KeyboardInterrupt:
         print("SoulBot 已停止。")
+    except EnvironmentError as exc:
+        print(f"启动失败：{exc}")
+        raise SystemExit(1) from None
     except (ValueError, OSError, yaml.YAMLError) as exc:
         # Do not print raw exception content: malformed config may contain secrets.
         print(f"启动失败（{type(exc).__name__}）：请检查 config.yaml、端口占用和 data 目录权限。")

@@ -1,6 +1,6 @@
 # SoulBot
 
-**当前版本 v0.4.0 · 可选 meme 扩展仓库**
+**当前版本 v0.5.0 · .env 账号与反向 WS 配置**
 
 具备可配置人格、模拟情绪、长期记忆与明确行为边界的 AI QQ 机器人平台。当前交付基础服务、QQ 文本消息处理、OpenAI 兼容 LLM 与原生 WebUI。人格和情绪均为软件模拟，不代表真实意识或主观情感。
 
@@ -16,12 +16,16 @@ Windows 双击 `start.cmd`。打开 <http://127.0.0.1:2526>，按向导创建管
 
 详细步骤见 [start.md](start.md)。完整路线见 [实施计划](IMPLEMENTATION_PLAN.md) 和 [任务清单](TASKS.md)。
 
+需要通过文件预设登录账号、恢复密码或配置反代 WS 时，参见 [.env 配置说明](docs/environment.md)。
+
 ## 目前可用
 
 - Python / NoneBot2 FastAPI 驱动 / OneBot V11 适配器初始化。
 - SQLite 管理员、持久会话、向导进度与审计。
 - 统一 Pydantic 配置、原子保存、上一版备份恢复、脱敏导出。
 - 独立密钥文件和 `.env` 支持；WebUI 不回显 Key。
+- `.env` 保存/应用 WebUI 管理账号与密码哈希；支持启动时预设或恢复账号，WebUI 修改账号会退出其他会话。
+- 反向/反代 WS 地址可在 QQ 页面保存到 `.env`，支持自定义接收路径；填写地址后仍需独立启用 QQ 并配置 Token。
 - 八步中文向导，默认推荐 NapCat；OneBot V11 文本消息收发和向主人发送测试消息。
 - 粉色渐变毛玻璃、响应式布局、本地图片/GIF/视频壁纸、动态开关。
 - Provider Registry、Tool Registry、默认拒绝权限和限次/超时执行基础。
