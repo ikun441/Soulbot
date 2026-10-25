@@ -208,6 +208,19 @@ class EmojiSettings(Model):
     max_filename_chars: int = Field(default=80, ge=20, le=200)
 
 
+class MemeExtensionSettings(Model):
+    enabled: bool = False
+    disabled_ids: list[str] = Field(default_factory=list, max_length=1000)
+    max_generations_per_minute: int = Field(default=6, ge=1, le=120)
+
+    @field_validator("disabled_ids")
+    @classmethod
+    def valid_ids(cls, values):
+        if any(not re.fullmatch(r"[a-zA-Z0-9_\-]{1,100}", value) for value in values):
+            raise ValueError("表情 ID 只能使用字母、数字、下划线和短横线，最多 100 字符")
+        return list(dict.fromkeys(values))
+
+
 class MemeSettings(Model):
     enabled: bool = False
     managed: bool = True
@@ -216,6 +229,18 @@ class MemeSettings(Model):
     base_url: str = "http://127.0.0.1:2233"
     timeout_seconds: float = Field(default=30, ge=5, le=120, allow_inf_nan=False)
     max_restarts: int = Field(default=3, ge=0, le=5)
+    disabled_ids: list[str] = Field(default_factory=list, max_length=1000)
+    max_generations_per_minute: int = Field(default=10, ge=1, le=120)
+    extensions: dict[Literal["contrib", "emoji", "tudou"], MemeExtensionSettings] = Field(
+        default_factory=lambda: {
+            name: MemeExtensionSettings() for name in ("contrib", "emoji", "tudou")
+        }
+    )
+
+    @field_validator("disabled_ids")
+    @classmethod
+    def valid_disabled_ids(cls, values):
+        return MemeExtensionSettings.valid_ids(values)
 
     @field_validator("base_url")
     @classmethod

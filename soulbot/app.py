@@ -111,7 +111,7 @@ def build_services(root):
     services.emoji = EmojiLibrary(root, config, db)
     if config.current.emoji.enabled:
         services.emoji.refresh()
-    services.meme = MemeService(root, config, db.audit)
+    services.meme = MemeService(root, config, db.audit, db)
     register_media_tools(services)
     services.agent = SoulBotAgent(config, db, services.llm, services)
     with db.connect() as connection:

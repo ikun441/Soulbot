@@ -83,6 +83,21 @@ def install_media_api(app, s, authorized):
     async def status():
         return s.meme.status()
 
+    @app.get("/api/meme/extensions", dependencies=protected)
+    async def extensions():
+        return {
+            "items": s.meme.extensions.status(s.meme.runtime()),
+            "settings": s.config.current.meme.model_dump(
+                include={"disabled_ids", "max_generations_per_minute", "extensions"}
+            ),
+        }
+
+    @app.post("/api/meme/extensions/{source}/install", dependencies=protected)
+    async def install_extension(source: Literal["contrib", "emoji", "tudou"]):
+        result = await s.meme.install_extension(source)
+        await asyncio.to_thread(s.db.audit, "meme_extension_requested", source)
+        return result
+
     @app.post("/api/meme/action", dependencies=protected)
     async def action(data: MemeAction):
         if data.action == "stop":

@@ -39,8 +39,8 @@ async def main():
     output = ROOT / "output" / "m2-live"
     db = Database(output / "data" / "soulbot.db")
     store = MediaStore(output, db)
-    manager = MemeService(ROOT, config, db.audit)
-    duplicate = MemeService(ROOT, config, db.audit)
+    manager = MemeService(ROOT, config, db.audit, db)
+    duplicate = MemeService(ROOT, config, db.audit, db)
     try:
         await manager.begin(install=True)
         await wait_running(manager)

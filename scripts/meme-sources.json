@@ -1,0 +1,29 @@
+{
+  "contrib": {
+    "repository": "MemeCrafters/meme-generator-contrib",
+    "commit": "8547f2e5718bfbb3328d700fe2c21d2ec5962500",
+    "sha256": "c8c8e91e930f063efea3cd0b24e9abc369915ed8bb7ab63f00a6efb07a735f9a",
+    "directory": "memes",
+    "archive_bytes": 45126057,
+    "description": "官方额外模板，包含实验性及可能引起不适的内容，默认关闭。",
+    "license": "MIT；素材及 README 说明另见原仓库"
+  },
+  "emoji": {
+    "repository": "anyliew/meme_emoji",
+    "commit": "3a51a9cd90cba6e4ad1b17b5cae4d283ab90b518",
+    "sha256": "2a72d68899f3e5018ab02a81af1749d5c0c2aff302edbf94f293abc8e89bfe4a",
+    "directory": "emoji",
+    "archive_bytes": 555049408,
+    "description": "更多热门表情模板；素材约 529MB，兼容 meme-generator 0.1.14。",
+    "license": "MIT；素材及 README 说明另见原仓库"
+  },
+  "tudou": {
+    "repository": "LRZ9712/tudou-meme",
+    "commit": "74a57ab5a37b481b466ac941f9fefc9902383978",
+    "sha256": "bdd5a398f8d5ab3ee5cf32a3d59491e72a1a2b72a5750d16c114415623e4bb89",
+    "directory": "meme",
+    "archive_bytes": 150471626,
+    "description": "独立创作的表情模板；与其他来源同名时保留先加载版本。",
+    "license": "MIT；素材及 README 说明另见原仓库"
+  }
+}

@@ -18,7 +18,7 @@ VERSION = "0.1.14"
 OFFICIAL = f"https://raw.githubusercontent.com/MemeCrafters/meme-generator/v{VERSION}/"
 
 
-def configure(root, port):
+def configure(root, port, settings=None):
     distribution = importlib.metadata.distribution("meme-generator")
     if distribution.version != VERSION:
         raise RuntimeError("Unexpected meme-generator version")
@@ -32,7 +32,10 @@ def configure(root, port):
         directory.mkdir(parents=True, exist_ok=True)
         setattr(module, f"BASE_{kind}_DIR", directory)
     (root / "config" / "config.toml").write_text(
-        f'[server]\nhost = "127.0.0.1"\nport = {port}\n'
+        "[meme]\nmeme_dirs = []\nmeme_disabled_list = "
+        + json.dumps((settings or {}).get("disabled_ids", []))
+        + "\n"
+        + f'[server]\nhost = "127.0.0.1"\nport = {port}\n'
         '[log]\nlog_level = "WARNING"\n'
         '[resource]\nresource_url = "https://raw.githubusercontent.com/MemeCrafters/meme-generator/"\n',
         encoding="utf-8",
@@ -116,7 +119,63 @@ async def prepare(root, package):
         print("resources verified", flush=True)
 
 
-def serve(root):
+def load_extensions(root, settings):
+    import meme_generator
+    import meme_generator.manager as manager
+    from meme_generator.log import logger
+
+    catalog = json.loads(Path(__file__).with_name("meme-sources.json").read_text())
+    origins = {key: "builtin" for key in manager.get_meme_keys()}
+    report = {}
+    for entry in (settings or {}).get("extensions", []):
+        name = entry["id"]
+        if name not in catalog or entry["commit"] != catalog[name]["commit"]:
+            raise ValueError("Unverified extension source")
+        directory = Path(entry["directory"])
+        if directory.is_symlink() or not directory.resolve().is_relative_to(
+            (root / "extensions" / name).resolve()
+        ):
+            raise ValueError("Extension directory escapes managed root")
+        disabled = set(entry.get("disabled_ids", []))
+        conflicts, errors = [], []
+        original = manager.add_meme
+
+        def tracked(key, *args, **kwargs):
+            if key in disabled:
+                return
+            if key in origins:
+                conflicts.append(key)
+                return
+            original(key, *args, **kwargs)
+            if key in manager.get_meme_keys():
+                origins[key] = name
+
+        def error_sink(message):
+            errors.append(str(message.record["message"]).splitlines()[0][-160:])
+
+        sink = logger.add(error_sink, level="ERROR")
+        manager.add_meme = meme_generator.add_meme = tracked
+        try:
+            manager.load_memes(directory)
+        finally:
+            manager.add_meme = meme_generator.add_meme = original
+            logger.remove(sink)
+        report[name] = {
+            "commit": entry["commit"],
+            "loaded_ids": sorted(key for key, source in origins.items() if source == name),
+            "conflicts": sorted(set(conflicts)),
+            "error_count": len(errors),
+            "errors": errors[:20],
+        }
+    write(
+        root / "loaded-templates.json",
+        json.dumps(
+            {"version": VERSION, "origins": origins, "extensions": report}, ensure_ascii=False
+        ).encode(),
+    )
+
+
+def serve(root, settings=None):
     import skia
     from pil_utils.text2image import font_collection
 
@@ -126,6 +185,7 @@ def serve(root):
         raise ValueError("Chinese font is not ready")
     fonts.registerTypeface(font)
     font_collection.setDefaultFontManager(fonts, font.getFamilyName())
+    load_extensions(root, settings)
     from meme_generator.app import run_server
 
     run_server()
@@ -136,16 +196,18 @@ def main():
     parser.add_argument("mode", choices=("prepare", "run"))
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--port", type=int, default=2233)
+    parser.add_argument("--settings", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    package = configure(root, args.port)
+    settings = json.loads(args.settings.read_text()) if args.settings else {}
+    package = configure(root, args.port, settings)
     if args.mode == "prepare":
         asyncio.run(prepare(root, package))
     else:
         if json.loads((root / "ready.json").read_text())["version"] != VERSION:
             raise ValueError("Run preparation first")
-        serve(root)
+        serve(root, settings)
 
 
 if __name__ == "__main__":

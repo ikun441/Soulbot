@@ -14,6 +14,8 @@ import httpx
 
 from soulbot.services.config_service import atomic_write
 from soulbot.services.media_service import MAX_IMAGE_BYTES, MediaError, inspect_image
+from soulbot.services.meme_extensions import MemeExtensions
+from soulbot.services.meme_policy import MemeRateLimiter
 
 VERSION = "0.1.14"
 PROJECT = Path(__file__).resolve().parents[2]
@@ -57,10 +59,32 @@ class InstanceLock:
 
 
 class MemeClient:
-    def __init__(self, config):
+    def __init__(self, config, root=None, db=None):
         self.config = config
+        self.root = root
+        self.rate = MemeRateLimiter(config, db)
         self.transport = None
         self.limiter = asyncio.Semaphore(2)
+
+    def origins(self):
+        if self.root and self.config.current.meme.managed:
+            try:
+                value = json.loads((self.root / "loaded-templates.json").read_text())["origins"]
+                return value if isinstance(value, dict) else {}
+            except (OSError, ValueError, KeyError):
+                pass
+        return {}
+
+    def allowed(self, key, origins=None):
+        origins = self.origins() if origins is None else origins
+        source = origins.get(key, "builtin" if self.config.current.meme.managed else "external")
+        settings = self.config.current.meme
+        if key in settings.disabled_ids:
+            raise MediaError("此表情 ID 已被管理员禁用")
+        profile = settings.extensions.get(source)
+        if profile and (not profile.enabled or key in profile.disabled_ids):
+            raise MediaError("此扩展或表情 ID 已被管理员禁用")
+        return source
 
     async def request(self, method, path, *, maximum=2 * 1024 * 1024, **kwargs):
         settings = self.config.current.meme
@@ -116,8 +140,6 @@ class MemeClient:
         if version != VERSION:
             raise MediaError(f"仅验证了 meme-generator {VERSION}，当前服务版本不匹配")
         keys = await self.keys()
-        if not keys:
-            raise MediaError("第三方服务未加载任何模板")
         return {"ok": True, "version": version, "templates": len(keys)}
 
     async def keys(self):
@@ -128,11 +150,20 @@ class MemeClient:
             or any(not isinstance(v, str) or not KEY.fullmatch(v) for v in values)
         ):
             raise MediaError("模板列表格式不兼容")
-        return sorted(values)
+        allowed = []
+        origins = self.origins()
+        for key in values:
+            try:
+                self.allowed(key, origins)
+            except MediaError:
+                continue
+            allowed.append(key)
+        return sorted(allowed)
 
     async def info(self, key):
         if not KEY.fullmatch(key):
             raise MediaError("模板名称无效")
+        source = self.allowed(key)
         value = await self.json(f"/memes/{key}/info")
         try:
             params = value["params_type"]
@@ -149,11 +180,15 @@ class MemeClient:
                 raise ValueError
         except (KeyError, TypeError, ValueError):
             raise MediaError("模板参数元数据无效，已停止生成") from None
+        value["soulbot_source"] = source
         return value
 
     async def preview(self, key):
         await self.info(key)
+        source = self.allowed(key)
+        await asyncio.to_thread(self.rate.reserve, source, "preview")
         async with self.limiter:
+            self.allowed(key)
             content = await self.request("GET", f"/memes/{key}/preview", maximum=MAX_IMAGE_BYTES)
             inspect_image(content)
             return content
@@ -193,7 +228,10 @@ class MemeClient:
         # Explicit multipart also when no images are required. Never pass model URLs.
         files += [("texts", (None, text)) for text in texts]
         files.append(("args", (None, json.dumps(args or {}))))
+        source = self.allowed(key)
+        await asyncio.to_thread(self.rate.reserve, source, "generate")
         async with self.limiter:
+            self.allowed(key)
             content = await self.request(
                 "POST", f"/memes/{key}/", files=files, maximum=MAX_IMAGE_BYTES
             )
@@ -202,10 +240,12 @@ class MemeClient:
 
 
 class MemeService:
-    def __init__(self, root, config, audit):
+    def __init__(self, root, config, audit, db=None):
         self.root = root / "third_party" / "meme-generator"
         self.config, self.audit = config, audit
-        self.client = MemeClient(config)
+        self.client = MemeClient(config, self.root, db)
+        self.extensions = MemeExtensions(self.root, config)
+        self.extension_error = None
         self.python = (
             self.root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         )
@@ -241,13 +281,21 @@ class MemeService:
             "busy": bool(
                 self.task
                 and not self.task.done()
-                and self.phase in {"installing", "preparing", "starting"}
+                and self.phase in {"installing", "preparing", "starting", "installing_extension"}
             ),
             "managed": self.config.current.meme.managed,
             "enabled": self.config.current.meme.enabled,
             "version": VERSION,
             "restarts": self.restarts,
+            "extension_error": self.extension_error,
+            "extensions": self.extensions.status(self.runtime()),
         }
+
+    def runtime(self):
+        try:
+            return json.loads((self.root / "loaded-templates.json").read_text())
+        except (OSError, ValueError):
+            return {}
 
     def state(self, phase, message):
         self.phase, self.message = phase, message
@@ -356,18 +404,52 @@ class MemeService:
         if not self.ready():
             raise MediaError("素材准备没有完成，已保留下载进度，可重新安装/修复")
 
-    async def begin(self, install=False):
+    async def begin(self, install=False, extension=None):
         if not self.config.current.meme.managed:
             raise MediaError("当前是外部服务模式；SoulBot 不会安装、启动或停止外部进程")
         if self.task and not self.task.done():
             raise MediaError("已有安装或托管任务，请先停止当前任务")
         if not self.lock.acquire():
             raise MediaError("已有另一个 SoulBot 实例管理此服务，不能重复启动")
-        self.task = asyncio.create_task(self.supervise(install), name="meme-service-supervisor")
+        self.task = asyncio.create_task(
+            self.supervise(install, extension), name="meme-service-supervisor"
+        )
         return self.status()
 
-    async def supervise(self, install):
+    async def install_extension(self, source):
+        if source not in self.extensions.catalog:
+            raise MediaError("未知扩展仓库")
+        if not self.config.current.meme.managed:
+            raise MediaError("下载扩展需要使用 SoulBot 托管模式")
+        if not self.ready():
+            raise MediaError("请先完成 meme-generator 基础组件安装")
+        if (
+            self.phase in {"installing", "preparing", "installing_extension"}
+            and self.task
+            and not self.task.done()
+        ):
+            raise MediaError("已有准备任务，请等待完成或先停止")
+        await self.close()
+        return await self.begin(extension=source)
+
+    async def supervise(self, install, extension=None):
         try:
+            if extension:
+                self.extension_error = None
+                self.state("installing_extension", "正在下载已验证的扩展版本")
+                try:
+                    await self.extensions.install(
+                        extension, lambda message: self.state("installing_extension", message)
+                    )
+                except (MediaError, OSError) as error:
+                    self.extension_error = (
+                        str(error)
+                        if isinstance(error, MediaError)
+                        else "扩展文件无法保存，请检查目录权限"
+                    )
+                    await asyncio.to_thread(self.audit, "meme_extension_failed", extension)
+                else:
+                    await asyncio.to_thread(self.audit, "meme_extension_installed", extension)
             if install:
                 await self.prepare()
             if not self.config.current.meme.enabled:
@@ -386,6 +468,10 @@ class MemeService:
                     if probe.connect_ex(("127.0.0.1", port)) == 0:
                         raise MediaError("meme 端口已被其它进程占用；未接管或停止未知进程")
                 self.state("starting", "正在启动并验证第三方 API")
+                atomic_write(
+                    self.root / "worker-settings.json",
+                    json.dumps(self.extensions.worker_settings(), ensure_ascii=False),
+                )
                 await self.spawn(
                     [
                         self.python,
@@ -395,6 +481,8 @@ class MemeService:
                         self.root,
                         "--port",
                         port,
+                        "--settings",
+                        self.root / "worker-settings.json",
                     ]
                 )
                 healthy = False
