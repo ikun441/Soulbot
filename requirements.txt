@@ -9,3 +9,4 @@ nonebot-adapter-onebot>=2.4,<3
 python-multipart>=0.0.20,<1
 Pillow>=11,<13
 tzdata>=2025.1
+jsonschema>=4.23,<5

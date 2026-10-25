@@ -32,7 +32,7 @@ def main():
         subprocess.run(command, check=True)
         stamp.write_text(fingerprint)
     subprocess.run([str(python), "-m", "pip", "check"], check=True)
-    print("M0 不自动安装系统服务；meme-generator 生命周期管理将在 M2 集成。", flush=True)
+    print("meme-generator 按 WebUI 配置在项目隔离目录准备和启动，不安装系统服务。", flush=True)
     if "--check" in sys.argv:
         subprocess.run([str(python), str(ROOT / "main.py"), "--check"], check=True)
         return

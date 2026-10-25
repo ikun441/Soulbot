@@ -1,6 +1,7 @@
 """NoneBot2/OneBot V11 transport. Core code never imports framework events."""
 
 import asyncio
+import base64
 import secrets
 
 import nonebot
@@ -14,6 +15,7 @@ from nonebot.adapters.onebot.v11 import (
 
 from soulbot.app import create_web_app
 from soulbot.core.events import ChatEvent
+from soulbot.services.media_service import ImagePayload
 
 
 def normalize(event: MessageEvent, known_bot_ids=()):
@@ -47,7 +49,11 @@ class NoneBotTransport:
 
     async def __call__(self, event, text):
         bot = nonebot.get_bot(event.bot_id)
-        message = MessageSegment.text(text)
+        message = (
+            MessageSegment.image("base64://" + base64.b64encode(text.data).decode())
+            if isinstance(text, ImagePayload)
+            else MessageSegment.text(text)
+        )
         if event.group_id:
             result = await bot.send_group_msg(group_id=int(event.group_id), message=message)
         else:
@@ -133,10 +139,12 @@ def create_runtime(services):
     nonebot.get_app().mount("/", web)
 
     async def shutdown():
+        await services.meme.close()
         await services.agent.close()
         await services.providers.close()
 
     driver.on_shutdown(shutdown)
+    driver.on_startup(services.meme.startup)
     import uvicorn
 
     config = uvicorn.Config(

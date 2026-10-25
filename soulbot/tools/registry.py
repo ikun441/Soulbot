@@ -12,10 +12,11 @@ class Tool:
     name: str
     description: str
     schema: type[BaseModel]
-    handler: Callable[[BaseModel], Awaitable[object]]
+    handler: Callable[..., Awaitable[object]]
     timeout: float = 10
     max_calls: int = 5
     affects_external: bool = False
+    with_context: bool = False
 
 
 @dataclass
@@ -25,6 +26,7 @@ class ToolContext:
     calls: dict[str, int] = field(default_factory=dict)
     total: int = 0
     max_total: int = 5
+    scope: str | None = None
 
 
 class ToolRegistry:
@@ -49,7 +51,10 @@ class ToolRegistry:
         context.calls[name] = context.calls.get(name, 0) + 1
         self.audit("tool_started", name)
         try:
-            result = await asyncio.wait_for(tool.handler(validated), tool.timeout)
+            operation = (
+                tool.handler(validated, context) if tool.with_context else tool.handler(validated)
+            )
+            result = await asyncio.wait_for(operation, tool.timeout)
         except Exception:
             self.audit("tool_failed", name)
             raise

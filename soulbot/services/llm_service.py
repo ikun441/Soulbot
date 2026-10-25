@@ -68,12 +68,18 @@ class LLMService:
         raise ProviderError("not_configured", "该 Provider 尚未配置")
 
     async def complete(
-        self, messages, purpose="explicit", tools=None, on_delta=None, output_limit=None
+        self,
+        messages,
+        purpose="explicit",
+        tools=None,
+        on_delta=None,
+        output_limit=None,
+        task_state=None,
     ):
         settings = self.config.current.model_copy(deep=True)
         required = ["tool_calling"] if tools else []
         chain = self.chain(settings, required)
-        total, last_error, emitted = 0, None, False
+        total, last_error, emitted = (task_state or {}).get("tokens", 0), None, False
 
         async def delta(text):
             nonlocal emitted
@@ -93,9 +99,12 @@ class LLMService:
                     min(
                         settings.limits.max_input_per_request,
                         endpoint.context_window - maximum - 128,
-                    ),
+                    )
+                    - (estimate_tokens([{"tools": tools}]) if tools else 0),
                 )
-                amount = estimate_tokens(prepared)
+                amount = estimate_tokens(prepared) + (
+                    estimate_tokens([{"tools": tools}]) if tools else 0
+                )
                 for attempt in range(endpoint.retries + 1):
                     if total + amount + maximum > settings.limits.max_per_agent_task:
                         raise ProviderError(
@@ -105,6 +114,8 @@ class LLMService:
                         self.budget.reserve, settings, endpoint, name, purpose, amount, maximum
                     )
                     total += amount + maximum
+                    if task_state is not None:
+                        task_state["tokens"] = total
                     await asyncio.to_thread(self.audit, "llm_started", name)
                     try:
                         result = await provider.complete(

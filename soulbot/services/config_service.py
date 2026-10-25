@@ -198,6 +198,55 @@ class Appearance(Model):
         return value
 
 
+class EmojiSettings(Model):
+    enabled: bool = True
+    directory: Literal["./emoji"] = "./emoji"
+    recursive: bool = True
+    max_candidates: int = Field(default=12, ge=1, le=50)
+    browse_enabled: bool = True
+    max_files: int = Field(default=100, ge=1, le=200)
+    max_filename_chars: int = Field(default=80, ge=20, le=200)
+
+
+class MemeSettings(Model):
+    enabled: bool = False
+    managed: bool = True
+    auto_install: bool = True
+    version: Literal["0.1.14"] = "0.1.14"
+    base_url: str = "http://127.0.0.1:2233"
+    timeout_seconds: float = Field(default=30, ge=5, le=120, allow_inf_nan=False)
+    max_restarts: int = Field(default=3, ge=0, le=5)
+
+    @field_validator("base_url")
+    @classmethod
+    def safe_url(cls, value):
+        return LLMEndpoint.valid_url(value)
+
+    @model_validator(mode="after")
+    def managed_loopback(self):
+        from urllib.parse import urlsplit
+
+        url = urlsplit(self.base_url)
+        if self.managed and (
+            url.scheme != "http"
+            or url.hostname != "127.0.0.1"
+            or url.path
+            or not url.port
+            or url.port < 1024
+        ):
+            raise ValueError("托管服务地址必须是 http://127.0.0.1:端口（1024 以上）")
+        return self
+
+
+class MediaToolPolicies(Model):
+    search_emoji: Literal["deny", "auto", "approval"] = "auto"
+    browse_emoji: Literal["deny", "auto", "approval"] = "auto"
+    select_emoji: Literal["deny", "auto", "approval"] = "auto"
+    generate_meme: Literal["deny", "auto", "approval"] = "auto"
+    list_meme_templates: Literal["deny", "auto", "approval"] = "auto"
+    get_meme_info: Literal["deny", "auto", "approval"] = "auto"
+
+
 class Settings(Model):
     soulbot: Identity = Field(default_factory=Identity)
     web: Web = Field(default_factory=Web)
@@ -207,6 +256,17 @@ class Settings(Model):
     behavior: Behavior = Field(default_factory=Behavior)
     appearance: Appearance = Field(default_factory=Appearance)
     limits: RequestLimits = Field(default_factory=RequestLimits)
+    emoji: EmojiSettings = Field(default_factory=EmojiSettings)
+    meme: MemeSettings = Field(default_factory=MemeSettings)
+    tools: MediaToolPolicies = Field(default_factory=MediaToolPolicies)
+
+    @model_validator(mode="after")
+    def distinct_ports(self):
+        from urllib.parse import urlsplit
+
+        if self.meme.managed and urlsplit(self.meme.base_url).port == self.web.port:
+            raise ValueError("meme-generator 与 SoulBot 需要使用不同端口")
+        return self
 
 
 def atomic_write(path: Path, content: str, mode=0o600):

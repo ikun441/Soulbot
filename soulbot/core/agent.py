@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import dataclass, field
 
 from soulbot.core.conversation import ConversationStore
@@ -13,12 +14,18 @@ class ActionExecutor:
         self.config, self.decision, self.audit = config, decision, audit
         self.sender = None
         self.lock = asyncio.Lock()
-        self.permissions = PermissionEngine({"send_text": "auto"})
+        self.permissions = PermissionEngine({"send_text": "auto", "send_image": "auto"})
 
     async def send(self, event, text, trigger):
+        return await self.deliver(event, text[:2000], trigger, "send_text")
+
+    async def send_image(self, event, image, trigger):
+        return await self.deliver(event, image, trigger, "send_image")
+
+    async def deliver(self, event, payload, trigger, permission):
         if not self.sender:
             return False
-        self.permissions.require("send_text")
+        self.permissions.require(permission)
         async with self.lock:
             if not await self.allowed(event, trigger):
                 return False
@@ -33,7 +40,7 @@ class ActionExecutor:
                 return False
             try:
                 async with asyncio.timeout(10):
-                    await self.sender(event, text[:2000])
+                    await self.sender(event, payload)
             except Exception:
                 await asyncio.to_thread(self.audit, "qq_send_failed", trigger)
                 return False
@@ -71,8 +78,9 @@ class Pending:
 
 
 class SoulBotAgent:
-    def __init__(self, config, db, llm):
+    def __init__(self, config, db, llm, services=None):
         self.config, self.db, self.llm = config, db, llm
+        self.services = services
         self.conversation = ConversationStore(db)
         self.decision = DecisionEngine(db, self.conversation)
         self.executor = ActionExecutor(config, self.decision, db.audit)
@@ -169,22 +177,105 @@ class SoulBotAgent:
             {"role": "user", "content": text},
         ]
         try:
-            result = await self.llm.complete(
-                messages, purpose="proactive" if trigger == "proactive" else "explicit"
+            result, attachments = await self.answer(
+                messages, event, "proactive" if trigger == "proactive" else "explicit"
             )
-            if result.tool_calls:
-                raise ProviderError("unsolicited_tool", "当前没有向模型提供工具，未执行任何操作")
-            if not result.text.strip() or result.text.strip() == "[[SILENT]]":
+            silent = not result.text.strip() or result.text.strip() == "[[SILENT]]"
+            if silent and not attachments:
                 await asyncio.to_thread(self.db.audit, "agent_silent", trigger)
                 return
-            if await self.executor.send(event, result.text, trigger):
+            delivered = False
+            text_delivered = False
+            if not silent:
+                text_delivered = await self.executor.send(event, result.text, trigger)
+                delivered = text_delivered
+            for reference, tool in attachments[:2]:
+                try:
+                    from soulbot.tools.media_tools import read_image
+
+                    self.services.tools.permissions.require(tool)
+                    image = await asyncio.to_thread(
+                        read_image, self.services, reference, event.scope
+                    )
+                    delivered = await self.executor.send_image(event, image, trigger) or delivered
+                except (PermissionError, ValueError):
+                    await asyncio.to_thread(self.db.audit, "image_send_blocked", tool)
+                except Exception:
+                    await asyncio.to_thread(self.db.audit, "image_send_failed", tool)
+            if delivered:
                 await asyncio.to_thread(
-                    self.conversation.remember, event.scope, text, result.text[:2000], settings
+                    self.conversation.remember,
+                    event.scope,
+                    text,
+                    (result.text[:2000] if text_delivered else "[已发送图片]"),
+                    settings,
                 )
                 if trigger == "proactive":
                     await asyncio.to_thread(self.decision.proactive_sent, event)
         except ProviderError as error:
             await asyncio.to_thread(self.db.audit, "agent_model_error", error.kind)
+
+    async def answer(self, messages, event, purpose):
+        from soulbot.tools.media_tools import specifications
+        from soulbot.tools.registry import ToolContext
+
+        specs, attachments, task_state = [], [], {}
+        if self.services:
+            specs = specifications(self.services)
+            if specs:
+                try:
+                    self.llm.chain(self.config.current, ["tool_calling"])
+                except ProviderError:
+                    specs = []
+        context = ToolContext(max_total=5, scope=event.scope)
+        proposed = 0
+        permitted = {spec["function"]["name"] for spec in specs}
+        for _ in range(4):
+            result = await self.llm.complete(
+                messages,
+                purpose=purpose,
+                **({"tools": specs or None, "task_state": task_state} if self.services else {}),
+            )
+            if not result.tool_calls:
+                return result, attachments
+            if not specs:
+                raise ProviderError("unsolicited_tool", "模型请求了未提供的工具，未执行任何操作")
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": result.text or None,
+                    "tool_calls": result.tool_calls,
+                }
+            )
+            for call in result.tool_calls:
+                proposed += 1
+                if proposed > 5:
+                    raise ProviderError("tool_limit", "工具请求已达本次任务上限")
+                name = call["function"]["name"]
+                if not await asyncio.to_thread(self.decision.access, self.config.current, event):
+                    raise ProviderError("permission", "会话权限已撤销，已停止工具任务")
+                try:
+                    if name not in permitted:
+                        raise PermissionError
+                    value = await self.services.tools.execute(
+                        name, json.loads(call["function"]["arguments"]), context
+                    )
+                    if isinstance(value, dict) and value.get("attachment"):
+                        reference = value["attachment"]
+                        if not any(old == reference for old, _ in attachments):
+                            attachments.append((reference, name))
+                except Exception:
+                    value = {
+                        "error": "工具调用未完成，可能被权限、参数或次数限制拒绝；不要声称成功"
+                    }
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "content": json.dumps(value, ensure_ascii=False),
+                    }
+                )
+        raise ProviderError("tool_limit", "模型工具对话已达轮数限制，已停止任务")
 
     async def admin_command(self, event):
         if not event.text.strip().startswith("/soulbot"):

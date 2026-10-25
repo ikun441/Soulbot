@@ -1,0 +1,8 @@
+# Isolated environment only. Tested on macOS arm64 / Python 3.11.
+meme-generator==0.1.14
+Pillow==10.4.0
+pil-utils==0.2.2
+skia-python==144.1
+fastapi==0.162.0
+starlette==1.10.0
+pydantic==2.14.1

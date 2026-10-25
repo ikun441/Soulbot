@@ -1,4 +1,4 @@
-# 第三方接入核查 · 2026-10-24
+# 第三方接入核查 · 2026-10-25
 
 ## NoneBot2 / OneBot / NapCat
 
@@ -14,8 +14,8 @@
 
 M2 将独立环境安装固定版本并真实验证 /openapi.json、模板 keys/info/preview 和生成接口，不把需求中的初步 URL 当作已验证契约。托管需要单实例锁、健康检查、退避重启、优雅终止和外部模式；资源与第三方错误不得影响核心。
 
-**当前尚未安装/集成/运行生成验收**，M2 才提供 API；本阶段不会返回伪造模板或图片结果。
+v0.3.0 已通过实际安装验收：Python 3.11 / macOS arm64，固定 meme-generator 0.1.14、Pillow10.4、pil-utils0.2.2、skia-python144.1。自动准备了 2,869 个校验素材和中文字体，实际读取 295 个模板；举牌 JPEG、petpet GIF、元数据、预览、重复实例拒绝和子进程崩溃恢复通过。实际健康接口为 `/meme/version`。详见 [多模态说明](multimodal.md)，可运行 scripts/verify_meme.py 复验。
 
 ## 其它 Provider
 
-LLM 以 HTTPX 实现 OpenAI 兼容 Chat Completions，可查询服务商模型、按需 SSE、解析服务商用量，按用户填写的价格估算费用。限流和服务端错误会按有限策略重试；未知或可能已计费结果保留预算。当前网页和 OneBot 消息只请求文本生成，不向模型开放可执行 Tool Calling。实际服务需要用户凭据。TTS/ASR/Image/Search 于 M2 实现；HTML Render 是模板渲染能力，不能作为自由生图 Provider 的自动等价替代。QQ 空间接口待 M5 验证，不支持时只保留草稿。
+LLM 以 HTTPX 实现 OpenAI 兼容 Chat Completions，可查询服务商模型、按需 SSE、解析服务商用量，按用户填写的价格估算费用。限流和服务端错误有限重试；未知或可能已计费结果保留预算。网页试聊只请求文本；QQ 可向声明支持 Tool Calling 的模型开放有界媒体工具，外部模型服务实际联调仍需用户凭据。TTS/ASR/云生图/Search/HTML Render 继续在后续增量实现；HTML Render 不作为自由生图的等价替代。QQ 空间接口待 M5 验证，不支持时只保留草稿。

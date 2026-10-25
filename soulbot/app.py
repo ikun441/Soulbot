@@ -30,8 +30,12 @@ from soulbot.providers.registry import ProviderRegistry
 from soulbot.services.auth_service import AuthService
 from soulbot.services.config_service import ConfigService, Model, Settings
 from soulbot.services.llm_service import LLMService
+from soulbot.services.media_service import MediaError, MediaStore
+from soulbot.services.meme_service import MemeService
 from soulbot.services.secret_service import SecretService
 from soulbot.storage.database import Database
+from soulbot.tools.emoji import EmojiLibrary
+from soulbot.tools.media_tools import register_media_tools
 from soulbot.tools.registry import ToolRegistry
 
 STATIC = Path(__file__).parent / "web" / "static"
@@ -75,6 +79,9 @@ class Services:
     llm: LLMService | None = None
     agent: SoulBotAgent | None = None
     qq_transport: object | None = None
+    media: MediaStore | None = None
+    emoji: EmojiLibrary | None = None
+    meme: MemeService | None = None
 
 
 def build_services(root):
@@ -99,7 +106,14 @@ def build_services(root):
     services.llm = LLMService(
         config, services.secrets, services.providers, services.budget, db.audit
     )
-    services.agent = SoulBotAgent(config, db, services.llm)
+    services.media = MediaStore(root, db)
+    services.media.cleanup()
+    services.emoji = EmojiLibrary(root, config, db)
+    if config.current.emoji.enabled:
+        services.emoji.refresh()
+    services.meme = MemeService(root, config, db.audit)
+    register_media_tools(services)
+    services.agent = SoulBotAgent(config, db, services.llm, services)
     with db.connect() as connection:
         connection.execute(
             "UPDATE llm_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
@@ -115,9 +129,13 @@ def create_web_app(root: Path, services=None):
 
     @asynccontextmanager
     async def lifespan(application):
-        yield
-        await s.agent.close()
-        await s.providers.close()
+        await s.meme.startup()
+        try:
+            yield
+        finally:
+            await s.meme.close()
+            await s.agent.close()
+            await s.providers.close()
 
     app = FastAPI(
         title="SoulBot",
@@ -170,6 +188,10 @@ def create_web_app(root: Path, services=None):
             else 502
         )
         return JSONResponse({"detail": str(exc), "kind": exc.kind}, status_code=code)
+
+    @app.exception_handler(MediaError)
+    async def media_error(request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=422)
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, exc):
@@ -259,12 +281,16 @@ def create_web_app(root: Path, services=None):
         return Settings.model_json_schema()
 
     @app.put("/api/config", dependencies=[Depends(authorized)])
-    def save_config(settings: Settings):
+    async def save_config(settings: Settings):
         if settings.qq.enabled and not s.secrets.get("onebot_access_token"):
             raise HTTPException(422, "启用 QQ 接入前，请先保存 Access Token")
         if settings.llm != s.config.current.llm:
             s.db.set("llm_last_test", "")
-        s.config.save(settings)
+        previous = s.config.current
+        await asyncio.to_thread(s.config.save, settings)
+        if previous.meme != settings.meme:
+            await s.meme.close()
+            await s.meme.startup()
         s.db.audit("config_saved")
         return configuration()
 
@@ -292,10 +318,16 @@ def create_web_app(root: Path, services=None):
         )
 
     @app.post("/api/config/restore", dependencies=[Depends(authorized)])
-    def restore_config():
+    async def restore_config():
         if not s.config.backup_path.exists():
             raise HTTPException(404, "还没有备份；每次保存配置会自动备份上一版")
-        s.config.restore()
+        previous = s.config.current
+        await asyncio.to_thread(s.config.restore)
+        if previous.llm != s.config.current.llm:
+            s.db.set("llm_last_test", "")
+        if previous.meme != s.config.current.meme:
+            await s.meme.close()
+            await s.meme.startup()
         s.db.audit("config_restored")
         return configuration()
 
@@ -330,9 +362,9 @@ def create_web_app(root: Path, services=None):
             "llm_last_test": json.loads(s.db.get("llm_last_test") or "null"),
             "pending_conversations": len(s.agent.pending),
             "usage": s.budget.summary(s.config.current),
-            "meme_generator": "尚未安装，M2 集成",
+            "meme_generator": s.meme.status(),
             "restart_required": restart_required(),
-            "stage": "M1 · QQ 与基础 AI",
+            "stage": "M2 · Emoji 与表情包生成",
         }
 
     def get_bots():
@@ -381,6 +413,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.chat import install_chat_api
 
     install_chat_api(app, s, authorized)
+    from soulbot.web.api.media import install_media_api
+
+    install_media_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

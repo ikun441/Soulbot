@@ -1,6 +1,6 @@
-# 配置说明 · v0.2.0
+# 配置说明 · v0.3.0
 
-普通用户通过 WebUI 配置，不需要手改 YAML。首次启动自动生成 config.yaml，实际字段以 `Settings.model_json_schema()` 为准，登录后可访问 `/api/config/schema`。M1 数据库会从 schema v1 自动迁移到 v2；升级前仍建议按启动文档备份。
+普通用户通过 WebUI 配置，不需要手改 YAML。首次启动自动生成 config.yaml，实际字段以 `Settings.model_json_schema()` 为准，登录后可访问 `/api/config/schema`。v0.3.0 会把旧数据库迁移到 schema v4，保留账户、额度和上下文，并增加表情索引、图片产物及会话范围；升级前按启动文档备份。
 
 | 配置区 | 当前字段 |
 | --- | --- |
@@ -11,6 +11,10 @@
 | personality | description、style、interests、owner_qq、owner_title、prompt |
 | behavior | 群聊模式、过滤/聚合/冷却、群级策略、免打扰、上下文、每日 Token/费用限制；autonomous/diary/qzone 当前必须 false |
 | appearance | motion、wallpaper、wallpaper_kind |
+| limits | 每次输入/输出、每个 Agent 任务总 Token；工具 Schema 和所有模型轮次均计入 |
+| emoji | enabled、directory（固定 ./emoji）、recursive、max_candidates、browse_enabled、max_files、max_filename_chars |
+| meme | enabled（默认 false）、managed、auto_install、version（固定0.1.14）、base_url、timeout_seconds、max_restarts |
+| tools | 媒体工具的 deny/auto/approval；当前 approval 会拒绝，审批队列尚未开放 |
 
 未知字段、无效端口/时区/非有限费用、非受支持的壁纸路径均被拒绝。失败不会覆盖现有文件。每次保存自动备份上一版至 data/config.backup.yaml；恢复操作会交换当前与备份版本。
 

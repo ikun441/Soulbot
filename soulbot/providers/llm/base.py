@@ -40,9 +40,11 @@ def estimate_tokens(messages: list[dict]) -> int:
 def trim_context(messages: list[dict], maximum: int) -> list[dict]:
     result = list(messages)
     while len(result) > 2 and estimate_tokens(result) > maximum:
-        result.pop(1)
-        if len(result) > 2 and result[1].get("role") == "assistant":
-            result.pop(1)
+        users = [i for i, item in enumerate(result) if item.get("role") == "user"]
+        # Drop complete older turns. Keep the current user + tool-call/result chain intact.
+        if len(users) < 2 or users[0] != 1:
+            break
+        del result[1 : users[1]]
     if estimate_tokens(result) > maximum:
         raise ProviderError("input_limit", "输入内容过长，请缩短消息或减少人格 Prompt")
     return result

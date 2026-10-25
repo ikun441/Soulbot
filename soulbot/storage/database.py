@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 2:
+            if version > 4:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -83,5 +83,26 @@ class Database:
                         unanswered INTEGER NOT NULL DEFAULT 0, pause_until REAL NOT NULL DEFAULT 0,
                         muted_until REAL NOT NULL DEFAULT 0);
                     UPDATE metadata SET value='2' WHERE key='schema_version';
+                    COMMIT;
+                """)
+            if version < 3:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS emoji_index (
+                        id TEXT PRIMARY KEY, path TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+                        category TEXT NOT NULL, mtime REAL NOT NULL,
+                        tags TEXT NOT NULL DEFAULT '[]', aliases TEXT NOT NULL DEFAULT '[]');
+                    CREATE TABLE IF NOT EXISTS media_artifacts (
+                        id TEXT PRIMARY KEY, filename TEXT NOT NULL, mime TEXT NOT NULL,
+                        width INTEGER NOT NULL, height INTEGER NOT NULL, size INTEGER NOT NULL,
+                        source TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL);
+                    UPDATE metadata SET value='3' WHERE key='schema_version';
+                    COMMIT;
+                """)
+            if version < 4:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    ALTER TABLE media_artifacts ADD COLUMN scope TEXT NOT NULL DEFAULT 'admin';
+                    UPDATE metadata SET value='4' WHERE key='schema_version';
                     COMMIT;
                 """)

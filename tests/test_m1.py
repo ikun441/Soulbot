@@ -232,7 +232,7 @@ def test_database_migrates_old_schema_without_losing_metadata(tmp_path):
     db = Database(tmp_path / "data" / "soulbot.db")
     db.set("wizard_step", "5")
     reopened = Database(tmp_path / "data" / "soulbot.db")
-    assert reopened.get("schema_version") == "2"
+    assert reopened.get("schema_version") == "4"
     assert reopened.get("wizard_step") == "5"
     with reopened.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 0
@@ -367,7 +367,7 @@ def test_llm_api_auth_and_test_chat_use_real_fixture(tmp_path):
 def test_send_test_only_accepts_explicit_confirmation(tmp_path):
     services = build_services(tmp_path)
     config = services.config.current.model_copy(deep=True)
-    config.personality.owner_qq = "3497689533"
+    config.personality.owner_qq = "123456789"
     config.qq.enabled = True
     services.secrets.save({"onebot_access_token": "fixture-onebot-token"})
     services.config.save(config)
@@ -390,5 +390,5 @@ def test_send_test_only_accepts_explicit_confirmation(tmp_path):
     assert client.post("/api/qq/send-test", json={"confirm": False}).status_code == 422
     result = client.post("/api/qq/send-test", json={"confirm": True})
     assert result.status_code == 200, result.text
-    assert calls and calls[0][0] == "3497689533"
+    assert calls and calls[0][0] == "123456789"
     assert len(calls) == 1

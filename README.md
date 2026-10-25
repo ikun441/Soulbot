@@ -1,6 +1,6 @@
 # SoulBot
 
-**当前版本 v0.2.0 · M1 QQ 与基础 AI**
+**当前版本 v0.3.0 · M2 Emoji 与 meme-generator 增量**
 
 具备可配置人格、模拟情绪、长期记忆与明确行为边界的 AI QQ 机器人平台。当前交付基础服务、QQ 文本消息处理、OpenAI 兼容 LLM 与原生 WebUI。人格和情绪均为软件模拟，不代表真实意识或主观情感。
 
@@ -28,10 +28,13 @@ Windows 双击 `start.cmd`。打开 <http://127.0.0.1:2526>，按向导创建管
 - OpenAI 兼容 Chat Completions、模型列表读取、有限重试/备用服务和可选 SSE。
 - QQ 私聊、群聊 @/唤醒/连续对话过滤、聚合、持久冷却、全局发送限速与管理员静音命令。
 - Token/费用预留、用量记录、网页试聊和群/私聊短期上下文隔离。
+- 本地 Emoji 中文索引/检索、上传、标签/别名、分页与 QQ 图片发送。
+- 独立 .venv 托管真实 meme-generator：安装素材、状态检测、有限重启、模板参数/预览/生成。
+- 表情库、表情包工坊、工具权限页，支持工具能力模型通过有界调用选择/制作图片。
 
 ## 开发边界
 
-NapCat、模型服务和密钥需用户自行配置。当前环境没有可用的 NapCat 登录会话或 LLM API Key，因此代码与本地协议夹具的验证不等于外部端到端验收。TTS/ASR/图片/meme-generator 在 M2 联调；持续人格/记忆在 M3，自主行为/日记在 M4，QQ 空间在 M5。所有未验收能力在界面中明确标注。
+NapCat、模型服务和密钥需用户自行配置。meme-generator 已实际安装并完成 JPEG/GIF/预览和进程恢复验证；NapCat/QQ 与真实外部 LLM 联调仍需有效账户。TTS/ASR/云端生图/HTML Render 是后续 M2 增量；持续人格/记忆在 M3，自主行为/日记在 M4，QQ 空间在 M5。详见 [多模态说明](docs/multimodal.md)。
 
 ```bash
 .venv/bin/python -m pip install -r requirements-dev.txt
