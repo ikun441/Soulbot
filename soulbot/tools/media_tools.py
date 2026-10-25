@@ -5,6 +5,7 @@ from pydantic import Field, field_validator
 
 from soulbot.core.permissions import PermissionEngine
 from soulbot.services.config_service import Model
+from soulbot.tools.html_render import CardRequest
 from soulbot.tools.registry import Tool
 
 
@@ -136,6 +137,17 @@ def register_media_tools(s):
             "message": "图片已生成，只有发送执行器确认后才算发出",
         }
 
+    async def render(args, context):
+        provider = s.providers.resolve("html_render")
+        content = await provider.render(args)
+        result = await asyncio.to_thread(
+            s.media.save, content, "html_render", context.scope or "admin"
+        )
+        return {
+            "attachment": "media:" + result["id"],
+            "message": "卡片已生成，只有发送执行器确认后才算发出",
+        }
+
     for name, description, schema, handler in [
         (
             "search_emoji",
@@ -158,6 +170,12 @@ def register_media_tools(s):
             GenerateMeme,
             generate,
         ),
+        (
+            "render_html",
+            "生成预定义文字、引用或清单卡片；只填结构化文本，不接受 HTML、脚本或资源网址。",
+            CardRequest,
+            render,
+        ),
     ]:
         s.tools.register(
             Tool(
@@ -165,9 +183,9 @@ def register_media_tools(s):
                 description,
                 schema,
                 handler,
-                timeout=120 if name == "generate_meme" else 30,
-                max_calls=2 if name == "generate_meme" else 5,
-                with_context=name == "generate_meme",
+                timeout=120 if name in {"generate_meme", "render_html"} else 30,
+                max_calls=2 if name in {"generate_meme", "render_html"} else 5,
+                with_context=name in {"generate_meme", "render_html"},
             )
         )
 
@@ -175,9 +193,15 @@ def register_media_tools(s):
 def specifications(s):
     config = s.config.current
 
-    def compact(value):
+    def compact(value, names=False):
         if isinstance(value, dict):
-            return {k: compact(v) for k, v in value.items() if k not in {"title", "default"}}
+            return {
+                key: compact(
+                    item, not names and key in {"properties", "$defs", "patternProperties"}
+                )
+                for key, item in value.items()
+                if names or key not in {"title", "default"}
+            }
         if isinstance(value, list):
             return [compact(v) for v in value]
         return value
@@ -193,5 +217,11 @@ def specifications(s):
         }
         for tool in s.tools.tools.values()
         if getattr(config.tools, tool.name, "deny") == "auto"
-        and (config.emoji.enabled if tool.name.endswith("emoji") else config.meme.enabled)
+        and (
+            config.html_render.enabled and s.renderer.ready()
+            if tool.name == "render_html"
+            else config.emoji.enabled
+            if tool.name.endswith("emoji")
+            else config.meme.enabled
+        )
     ]

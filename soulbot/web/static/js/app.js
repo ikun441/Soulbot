@@ -1,5 +1,5 @@
 import { changePage, revealPage, moveNav, toast, openDialog, closeDialog, stopMotion, wallpaperFade } from "./motion.js";
-import {emojiPage, memePage, toolsPage, stopMediaUI} from './media.js';
+import {emojiPage, memePage, renderPage, toolsPage, stopMediaUI} from './media.js';
 const $ = (selector, node = document) => node.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const paths = {
@@ -15,8 +15,8 @@ const paths = {
  heart:'M20 4c-3-2-6 0-8 3-2-3-5-5-8-3-7 5 8 16 8 16S27 9 20 4Z', clock:'M12 7v5l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z'
 };
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name] || paths.heart}"/></svg>`;
-paths.behavior=paths.shield; paths.usage=paths.clock;paths.emoji=paths.heart;paths.meme=paths.model;paths.tools=paths.shield;paths.account=paths.shield;
-const nav = [['dashboard','空间概览'],['setup','初次相遇','引导'],['qq','QQ 连接'],['model','AI 模型'],['personality','人格设定'],['behavior','聊天与权限'],['emoji','Emoji 表情库'],['meme','表情包工坊'],['tools','工具权限'],['usage','Token 与费用'],['appearance','外观与壁纸'],['account','登录账号'],['logs','操作记录'],['version','关于 SoulBot']];
+paths.behavior=paths.shield; paths.usage=paths.clock;paths.emoji=paths.heart;paths.meme=paths.model;paths.tools=paths.shield;paths.account=paths.shield;paths.cards=paths.setup;
+const nav = [['dashboard','空间概览'],['setup','初次相遇','引导'],['qq','QQ 连接'],['model','AI 模型'],['personality','人格设定'],['behavior','聊天与权限'],['emoji','Emoji 表情库'],['meme','表情包工坊'],['cards','卡片工坊'],['tools','工具权限'],['usage','Token 与费用'],['appearance','外观与壁纸'],['account','登录账号'],['logs','操作记录'],['version','关于 SoulBot']];
 const steps = ['欢迎','管理员','连接 QQ','AI 模型','人格','多模态','行为权限','检查完成'];
 let B, C, S, health, step = 0, page = '', noticeTimer, dirty = false, restartToken = false;
 let chatController=null, webHistory=[];
@@ -164,7 +164,7 @@ function wizard() {
  if (step===2) content=qqForm();
  if (step===3) content=modelForm();
  if (step===4) content=personalityForm();
- if (step===5) content=`<div class="note">本版本已开放本地 Emoji 和真实 meme-generator。可在完成向导后进入“Emoji 表情库”和“表情包工坊”，上传图片、准备第三方素材并生成表情。</div>${toggle('启用本地表情库','emoji.enabled','自动扫描项目 emoji 目录，支持中文分类和标签。')}<p class="muted">meme-generator 是选配服务。首次安装会在项目内创建独立环境并下载模板素材和字体，可在管理页查看状态和停止。TTS、ASR、云端生图、HTML 卡片与搜索将在后续更新实现，现在可以跳过。</p>`;
+ if (step===5) content=`<div class="note">本版本已开放本地 Emoji、真实 meme-generator 和 HTML 卡片。完成向导后可进入各自工坊，准备素材/浏览器并生成图片。</div>${toggle('启用本地表情库','emoji.enabled','自动扫描项目 emoji 目录，支持中文分类和标签。')}${toggle('启用 HTML 卡片','html_render.enabled','先在卡片工坊准备项目专用 Chromium；不调用云端生图。')}<p class="muted">meme-generator 与 Chromium 均为选配，安装前会说明下载内容。TTS、ASR、云端生图与搜索将在后续更新实现，现在可以跳过。</p>`;
  if (step===6) content=permissionsForm();
  if (step===7) content=`<div class="note">基础配置检查已就绪。完成后可进入仪表盘；未配置的 QQ 和 AI 服务可以稍后补充。</div><div class="rows"><div class="row"><span>管理员账户</span>${badge(B.has_admin?'已创建':'未创建',B.has_admin?'good':'wait')}</div><div class="row"><span>QQ 适配器</span>${badge(C.qq.enabled?'启用，重启后应用':'暂未启用')}</div><div class="row"><span>LLM 接入信息</span>${badge(C.llm.model&&S.llm_api_key?'已保存，请运行真实测试':'可稍后配置')}</div><div class="row"><span>多模态与 meme-generator</span>${badge('Emoji / meme 已开放')}</div><div class="row"><span>自主社交 / QQ 空间</span>${badge('关闭','good')}</div></div><div class="actions"><button type="button" id="final-check" class="button outline">运行本机健康检查</button></div><p id="final-result" class="note" hidden></p>`;
  mount(`${heading('FIRST HELLO','从这里，遇见你的 SoulBot。','每一步都附有说明。选配功能可以留到以后，已保存的进度不会丢失。')}<div class="wizard-steps" aria-label="配置步骤">${steps.map((name,i)=>`<span class="step-dot ${i===step?'current':i<step?'done':''}" ${i===step?'aria-current="step"':''}>${String(i+1).padStart(2,'0')} ${name}</span>`).join('')}</div><form id="editor" class="panel"><div class="wizard-title"><span class="step-number">${String(step+1).padStart(2,'0')}</span><div><div class="mini-label">LET’S MAKE IT YOURS</div><h2>${steps[step]}</h2></div></div><div class="wizard-body">${content}</div><div class="wizard-footer"><span class="save-status">${B.has_admin?'点击下一步保存配置':'先创建账户，再安全保存进度'}</span><div class="actions">${step>0?'<button type="button" id="previous" class="button quiet">上一步</button>':''}<button type="button" id="next" class="button primary">${step===0?'开始配置':step===5?'跳过，稍后配置':step===7?'完成并进入空间':'保存并继续'} ${icon('arrow')}</button></div></div></form>`);
@@ -192,13 +192,18 @@ async function logs() {
  mount(`${heading('ACTIVITY','每一次改变，都有迹可循。','这里只记录管理操作，不记录密码、API Key 或聊天正文。')}<section class="panel"><h2>最近的操作</h2>${data.items.length?data.items.map(item=>`<div class="log-item"><span class="log-time">${esc(item.created_at)} UTC</span><span>${esc(labels[item.action]||item.action)}</span></div>`).join(''):'<p class="empty-state">还没有操作记录。</p>'}</section>`);
 }
 function version() {
- mount(`${heading('ABOUT SOULBOT','保持好奇，慢慢生长。','一个有个性、有连续记忆，也尊重边界的 AI 社交角色平台。')}<section class="panel"><div class="section-title" style="margin-top:0"><h2>SoulBot ${esc(B.version)}</h2>${badge('M2 · Emoji 与表情包生成','good')}</div><p class="muted">原生 WebUI · FastAPI · NoneBot2 · SQLite</p><article class="release"><div class="mini-label">2026.10.25 / EMOJI & MEME</div><h3 style="margin-top:10px">从一次问候，开始真正的对话。</h3><ul><li>.venv 自动管理与 Linux/macOS、Windows 启动入口。</li><li>八步首次向导、管理员登录与可恢复配置。</li><li>配置 Schema、独立密钥存储、SQLite 状态与操作记录。</li><li>粉色渐变毛玻璃、图片 / GIF / 视频壁纸和动态开关。</li><li>真实模型测试/流式试聊、备用服务、用量账本与预算预留。</li><li>QQ 私聊/群聊过滤、有向连续对话、持久冷却和消息聚合。</li></ul></article><div class="note warning">当前已接通文本模型与 QQ 消息处理；TTS/ASR、云端生图、HTML 卡片、长期记忆、日记与空间发布按后续阶段实现。界面中的连接信息不等于真实端到端验收。</div><div class="actions"><a class="button outline" href="https://github.com/ikun441/Soulbot" target="_blank" rel="noopener noreferrer">GitHub 仓库 ↗</a><a class="button quiet" href="#setup">查看首次向导</a></div></section>`);
+ mount(`${heading('ABOUT SOULBOT','保持好奇，慢慢生长。','人格、记忆与社交能力，正在一步步构建。')}
+ <section class="panel"><div class="section-title" style="margin-top:0"><h2>SoulBot ${esc(B.version)}</h2>${badge('M2 · 图片与卡片表达','good')}</div>
+ <p class="muted">原生 WebUI · FastAPI · NoneBot2 · SQLite</p><article class="release"><div class="mini-label">2026.10.25 / HTML CARDS</div><h3 style="margin-top:10px">让值得记住的话，有自己的模样。</h3>
+ <ul><li>Chromium 生成中文文字、引用和清单卡片，支持三种配色。</li><li>卡片工坊提供准备环境、实际生成、私有预览和下载。</li><li>Emoji、meme-generator 和三个可选表情模板仓库。</li><li>.env 管理登录账号、密码哈希和反向 / 反代 WS 地址。</li><li>QQ 文本处理、模型工具、会话隔离、Token 与费用限制。</li></ul></article>
+ <div class="note warning">M2 仍在推进：TTS/ASR 与云端生图尚未开放。持续情绪与长期记忆在 M3，日记和自主行为在 M4，空间发布在 M5。真实 QQ 与外部模型联调仍需配置可用账户。</div>
+ <div class="actions"><a class="button outline" href="https://github.com/ikun441/Soulbot" target="_blank" rel="noopener noreferrer">GitHub 仓库 ↗</a><a class="button quiet" href="#cards">打开卡片工坊</a></div></section>`);
 }
 function render(target) {
  page=target;
  if(!B.has_admin){step=target==='setup'?step:0;page='setup';wizard();return;}
  if(!B.authenticated){renderLogin();return;}
- if(target==='dashboard')dashboard();else if(target==='setup')wizard();else if(['qq','model','personality'].includes(target))editorPage(target);else if(target==='behavior')behaviorPage();else if(target==='emoji')guarded(()=>emojiPage(mediaContext()));else if(target==='meme')guarded(()=>memePage(mediaContext()));else if(target==='tools')toolsPage(mediaContext());else if(target==='usage')guarded(usagePage);else if(target==='appearance')appearance();else if(target==='account')guarded(accountPage);else if(target==='logs')guarded(logs);else if(target==='version')version();else{page='dashboard';dashboard();}
+ if(target==='dashboard')dashboard();else if(target==='setup')wizard();else if(['qq','model','personality'].includes(target))editorPage(target);else if(target==='behavior')behaviorPage();else if(target==='emoji')guarded(()=>emojiPage(mediaContext()));else if(target==='meme')guarded(()=>memePage(mediaContext()));else if(target==='cards')guarded(()=>renderPage(mediaContext()));else if(target==='tools')toolsPage(mediaContext());else if(target==='usage')guarded(usagePage);else if(target==='appearance')appearance();else if(target==='account')guarded(accountPage);else if(target==='logs')guarded(logs);else if(target==='version')version();else{page='dashboard';dashboard();}
 }
 function mediaContext(){return {mount,heading,field,toggle,select,esc,api,send,guarded,notice,confirmAction,saveEditor,config:()=>C,motion:()=>document.body.dataset.motion==='true'};}
 document.addEventListener('click',e=>{const a=e.target.closest('a[href^="#"]');if(!a)return;e.preventDefault();if(dirty){notice('请先保存当前表单，再切换页面。',true);return;}const target=a.hash.slice(1);const backward=nav.findIndex(item=>item[0]===target)<nav.findIndex(item=>item[0]===page);changePage(()=>render(target),backward?'backward':'forward');});

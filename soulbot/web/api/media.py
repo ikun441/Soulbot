@@ -8,6 +8,7 @@ from pydantic import Field, field_validator
 from soulbot.core.events import ChatEvent
 from soulbot.services.config_service import Model
 from soulbot.services.media_service import MAX_IMAGE_BYTES, MediaError
+from soulbot.tools.html_render import CardRequest
 from soulbot.tools.media_tools import GenerateMeme, read_image, specifications
 
 
@@ -27,6 +28,10 @@ class MemeAction(Model):
     action: Literal["install", "start", "stop"]
 
 
+class RenderAction(Model):
+    action: Literal["install", "cancel"]
+
+
 class SendImage(Model):
     confirm: Literal[True]
     image: str = Field(pattern=r"^(emoji|media):[a-f0-9]{32}$")
@@ -34,6 +39,27 @@ class SendImage(Model):
 
 def install_media_api(app, s, authorized):
     protected = [Depends(authorized)]
+
+    @app.get("/api/render/status", dependencies=protected)
+    async def render_status():
+        return s.renderer.status()
+
+    @app.post("/api/render/action", dependencies=protected)
+    async def render_action(data: RenderAction):
+        result = (
+            await s.renderer.begin_install()
+            if data.action == "install"
+            else await s.renderer.cancel_install()
+        )
+        await asyncio.to_thread(s.db.audit, "html_render_action", data.action)
+        return result
+
+    @app.post("/api/render/generate", dependencies=protected)
+    async def render_card(data: CardRequest):
+        content = await s.providers.resolve("html_render").render(data)
+        item = await asyncio.to_thread(s.media.save, content, "html_render")
+        await asyncio.to_thread(s.db.audit, "html_render_generated", data.template)
+        return item
 
     @app.get("/api/emoji", dependencies=protected)
     async def emoji(

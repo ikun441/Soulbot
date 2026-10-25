@@ -34,6 +34,7 @@ from soulbot.services.environment_service import EnvironmentError, EnvironmentSe
 from soulbot.services.llm_service import LLMService
 from soulbot.services.media_service import MediaError, MediaStore
 from soulbot.services.meme_service import MemeService
+from soulbot.services.render_service import HTMLRenderService
 from soulbot.services.secret_service import SecretService
 from soulbot.storage.database import Database
 from soulbot.tools.emoji import EmojiLibrary
@@ -79,6 +80,7 @@ class Services:
     media: MediaStore | None = None
     emoji: EmojiLibrary | None = None
     meme: MemeService | None = None
+    renderer: HTMLRenderService | None = None
 
 
 def build_services(root):
@@ -111,6 +113,8 @@ def build_services(root):
     if config.current.emoji.enabled:
         services.emoji.refresh()
     services.meme = MemeService(root, config, db.audit, db)
+    services.renderer = HTMLRenderService(root, config, db.audit)
+    services.providers.register("html_render", "chromium", services.renderer, default=True)
     register_media_tools(services)
     services.agent = SoulBotAgent(config, db, services.llm, services)
     with db.connect() as connection:

@@ -4,7 +4,7 @@ export function stopMediaUI() { clearInterval(statusTimer); statusTimer = undefi
 
 function resultCard(ctx, node, item, reference) {
  const {esc, confirmAction, send, guarded, notice} = ctx;
- node.innerHTML = `<img class="generated-image" src="${esc(item.url)}" alt="生成的表情图片"><p class="row-detail">${esc(item.mime || '本地表情')} ${item.width ? `· ${item.width} × ${item.height}` : ''} ${item.size ? `· ${Math.ceil(item.size/1024)} KB` : ''}</p><div class="actions"><a class="button outline small" href="${esc(item.url)}" download>下载图片</a><button class="button quiet small" data-send-image>发送给主人 QQ</button></div>`;
+ node.innerHTML = `<img class="generated-image" src="${esc(item.url)}" alt="生成的图片"><p class="row-detail">${esc(item.mime || '本地表情')} ${item.width ? `· ${item.width} × ${item.height}` : ''} ${item.size ? `· ${Math.ceil(item.size/1024)} KB` : ''}</p><div class="actions"><a class="button outline small" href="${esc(item.url)}" download>下载图片</a><button class="button quiet small" data-send-image>发送给主人 QQ</button></div>`;
  node.querySelector('[data-send-image]').onclick = () => confirmAction('发送图片给主人？','这会向人格配置中的主人 QQ 发送一张真实图片，每分钟最多一次。', async () => {const result = await send('/api/media/send-test','POST',{confirm:true,image:reference});notice(result.message);});
 }
 
@@ -59,8 +59,30 @@ export async function memePage(ctx) {
  if(ctx.config().meme.enabled)await load();
 }
 
+export async function renderPage(ctx){
+ const {mount,heading,field,toggle,api,send,guarded,notice,confirmAction,saveEditor}=ctx;
+ mount(`${heading('CARD STUDIO','把一句话，认真收藏。','文字、引用和清单，都可以成为一张卡片。')}<form id="editor" class="panel">${toggle('启用 HTML 卡片','html_render.enabled','本机 Chromium 渲染，不调用云端生图服务；文字仅在本机处理。')}<div class="form-grid">${field('图片宽度（像素）','html_render.width','','number','min="480" max="1200" required')}${field('高度上限（像素）','html_render.max_height','内容超出上限时提示缩短内容，不会裁掉正文。','number','min="400" max="2400" required')}${field('生成超时（秒）','html_render.timeout_seconds','包含排队时间；同时最多生成 2 张卡片。','number','min="5" max="60" required')}</div><div class="actions"><button id="save" class="button primary">保存卡片设置</button></div></form><section class="panel media-section"><h2>准备本机渲染环境</h2><p class="row-detail">首次需要下载数百 MB 的 Chromium 和中文字体，保存在项目 data/html_render；不会安装系统服务或系统组件。Linux 缺少浏览器系统库时会提示准备失败。</p><p id="render-status" class="note" aria-live="polite">正在读取状态…</p><div class="actions"><button id="render-install" class="button outline">准备 / 检查 Chromium</button><button id="render-cancel" class="button quiet" disabled>取消准备</button></div></section><section class="panel media-section" data-transient><form id="card-form"><div class="form-grid"><div class="field"><label for="card-template">卡片类型</label><select id="card-template"><option value="note">文字卡</option><option value="quote">引用卡</option><option value="list">清单卡</option></select></div><div class="field"><label for="card-theme">配色</label><select id="card-theme"><option value="pink">樱花粉</option><option value="lilac">浅紫</option><option value="mint">薄荷绿</option></select></div><div class="field full"><label for="card-title">标题</label><input id="card-title" value="今天的小小收获" maxlength="80" required></div><div class="field full"><label for="card-body">正文</label><textarea id="card-body" maxlength="1200" rows="5" required>把值得记住的瞬间，轻轻放在这里。\n一步一步，也是一种前进。</textarea></div><div class="field full" id="card-items-field" hidden><label for="card-items">清单项目</label><textarea id="card-items" rows="5" maxlength="1500" placeholder="每行一项，最多 12 项，每项 120 字"></textarea></div><div class="field full"><label for="card-footer">署名 / 页脚</label><input id="card-footer" value="SoulBot · 记录此刻" maxlength="100"></div></div><div class="actions"><button id="card-generate" class="button primary" type="submit" disabled>保存设置并生成卡片</button></div><p class="row-detail">使用固定模板，文本中的标签会按文字显示。图片保留 24 小时，可下载或手动发送给主人。</p></form><div id="card-output" class="media-section" aria-live="polite"></div></section>`);
+ async function poll(){
+  if(!$('#render-status'))return;
+  const status=await api('/api/render/status');if(!$('#render-status'))return;
+  const message=status.message+(status.browser_version?' · Chromium '+status.browser_version:'')+(status.pending?' · '+status.pending+' 个任务':'');
+  if($('#render-status').textContent!==message)$('#render-status').textContent=message;
+  $('#render-install').disabled=status.installing;$('#render-cancel').disabled=!status.installing;
+  $('#card-generate').disabled=!status.enabled||!status.ready||status.installing;
+ }
+ $('#render-install').onclick=()=>confirmAction('准备本机 Chromium？','将下载浏览器和中文字体到项目目录，首次可能需要几分钟。',async()=>{if(!await saveEditor())return;await send('/api/render/action','POST',{action:'install'});await poll();});
+ $('#render-cancel').onclick=e=>guarded(async()=>{await send('/api/render/action','POST',{action:'cancel'});await poll();notice('准备任务已取消');},e.currentTarget);
+ $('#card-template').onchange=()=>{const list=$('#card-template').value==='list';$('#card-items-field').hidden=!list;$('#card-items').required=list;$('#card-body').required=!list;};
+ $('#card-form').onsubmit=e=>{e.preventDefault();guarded(async()=>{
+  if(!await saveEditor())return;const template=$('#card-template').value;
+  const result=await send('/api/render/generate','POST',{template,theme:$('#card-theme').value,title:$('#card-title').value,body:$('#card-body').value,items:template==='list'?$('#card-items').value.split('\n').map(v=>v.trim()).filter(Boolean):[],footer:$('#card-footer').value});
+  if($('#card-output'))resultCard(ctx,$('#card-output'),result,'media:'+result.id);
+ },e.submitter);};
+ await poll();if($('#render-status'))statusTimer=setInterval(()=>guarded(poll),2500);
+}
+
 export function toolsPage(ctx){
  const {mount,heading,select}=ctx;
- const labels={search_emoji:'检索表情',browse_emoji:'分页浏览表情',select_emoji:'选择本轮表情图片',list_meme_templates:'查询模板列表',get_meme_info:'查询模板元数据',generate_meme:'生成表情包图片'};
+ const labels={search_emoji:'检索表情',browse_emoji:'分页浏览表情',select_emoji:'选择本轮表情图片',list_meme_templates:'查询模板列表',get_meme_info:'查询模板元数据',generate_meme:'生成表情包图片',render_html:'生成预定义卡片图片'};
  mount(`${heading('TOOLS & PERMISSIONS','让能力，始终有清晰边界。','模型可以提出工具调用，服务端负责验证权限、参数、次数与最终发送。')}<form class="panel" id="editor"><div class="note">每次 QQ 任务最多 5 次工具调用、4 轮模型请求，最终最多发送 2 张图片。需要在 AI 模型高级设置中声明真实工具调用能力。网页试聊仍只请求文本。</div><div class="form-grid">${Object.entries(labels).map(([key,label])=>select(label,'tools.'+key,[['deny','禁止'],['auto','自动（遵守权限与次数）'],['approval','需要审批（当前拒绝执行）']])).join('')}</div><div class="actions"><button id="save" class="button primary">保存工具权限</button></div><p class="row-detail">审批队列在 M4 开放；当前需要审批的工具始终被拒绝。图片发送前会再次检查接入权限。</p></form>`);
 }

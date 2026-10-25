@@ -300,6 +300,14 @@ class MediaToolPolicies(Model):
     generate_meme: Literal["deny", "auto", "approval"] = "auto"
     list_meme_templates: Literal["deny", "auto", "approval"] = "auto"
     get_meme_info: Literal["deny", "auto", "approval"] = "auto"
+    render_html: Literal["deny", "auto", "approval"] = "auto"
+
+
+class HTMLRenderSettings(Model):
+    enabled: bool = False
+    width: int = Field(default=800, ge=480, le=1200)
+    max_height: int = Field(default=1800, ge=400, le=2400)
+    timeout_seconds: float = Field(default=20, ge=5, le=60, allow_inf_nan=False)
 
 
 class Settings(Model):
@@ -314,6 +322,7 @@ class Settings(Model):
     emoji: EmojiSettings = Field(default_factory=EmojiSettings)
     meme: MemeSettings = Field(default_factory=MemeSettings)
     tools: MediaToolPolicies = Field(default_factory=MediaToolPolicies)
+    html_render: HTMLRenderSettings = Field(default_factory=HTMLRenderSettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):
