@@ -25,6 +25,7 @@ class Database:
                     id INTEGER PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     action TEXT NOT NULL, detail TEXT NOT NULL);
             """)
+        self.migrate()
         path.chmod(0o600)
 
     @contextmanager
@@ -49,3 +50,38 @@ class Database:
     def audit(self, action, detail=""):
         with self.connect() as db:
             db.execute("INSERT INTO audit(action,detail) VALUES (?,?)", (action, detail))
+
+    def migrate(self):
+        with self.connect() as db:
+            version = int(
+                db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
+            )
+            if version > 2:
+                raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
+            if version < 2:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS llm_usage (
+                        id TEXT PRIMARY KEY, day TEXT NOT NULL, provider TEXT NOT NULL,
+                        model TEXT NOT NULL, purpose TEXT NOT NULL, status TEXT NOT NULL,
+                        input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+                        reasoning_tokens INTEGER, estimated INTEGER NOT NULL DEFAULT 1,
+                        cost_cny REAL, created_at REAL NOT NULL, error_kind TEXT);
+                    CREATE INDEX IF NOT EXISTS usage_day ON llm_usage(day);
+                    CREATE TABLE IF NOT EXISTS chat_context (
+                        id INTEGER PRIMARY KEY, scope TEXT NOT NULL, role TEXT NOT NULL,
+                        content TEXT NOT NULL, expires REAL NOT NULL);
+                    CREATE INDEX IF NOT EXISTS context_scope ON chat_context(scope, id);
+                    CREATE TABLE IF NOT EXISTS seen_events (
+                        key TEXT PRIMARY KEY, expires REAL NOT NULL);
+                    CREATE TABLE IF NOT EXISTS conversation_state (
+                        scope TEXT PRIMARY KEY, last_reply REAL NOT NULL DEFAULT 0);
+                    CREATE TABLE IF NOT EXISTS group_state (
+                        scope TEXT PRIMARY KEY, last_call REAL NOT NULL DEFAULT 0,
+                        last_proactive REAL NOT NULL DEFAULT 0, day TEXT NOT NULL DEFAULT '',
+                        proactive_count INTEGER NOT NULL DEFAULT 0,
+                        unanswered INTEGER NOT NULL DEFAULT 0, pause_until REAL NOT NULL DEFAULT 0,
+                        muted_until REAL NOT NULL DEFAULT 0);
+                    UPDATE metadata SET value='2' WHERE key='schema_version';
+                    COMMIT;
+                """)

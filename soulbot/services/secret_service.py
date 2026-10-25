@@ -7,7 +7,12 @@ from dotenv import dotenv_values
 
 from soulbot.services.config_service import atomic_write
 
-NAMES = {"llm_api_key": "SOULBOT_LLM_API_KEY", "onebot_access_token": "SOULBOT_ONEBOT_ACCESS_TOKEN"}
+NAMES = {
+    "llm_api_key": "SOULBOT_LLM_API_KEY",
+    "onebot_access_token": "SOULBOT_ONEBOT_ACCESS_TOKEN",
+    "llm_fallback_1": "SOULBOT_LLM_FALLBACK_1",
+    "llm_fallback_2": "SOULBOT_LLM_FALLBACK_2",
+}
 
 
 class SecretService:

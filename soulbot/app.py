@@ -1,4 +1,4 @@
-"""Administration app. No QQ event handlers or model calls are enabled in M0."""
+"""Administration API and composition root for the shared SoulBot services."""
 
 import asyncio
 import hashlib
@@ -7,6 +7,7 @@ import platform
 import re
 import secrets
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -21,10 +22,14 @@ from pydantic import Field, SecretStr
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from soulbot import VERSION
+from soulbot.core.agent import SoulBotAgent
+from soulbot.core.budget import BudgetService
 from soulbot.core.permissions import PermissionEngine
+from soulbot.providers.llm.base import ProviderError
 from soulbot.providers.registry import ProviderRegistry
 from soulbot.services.auth_service import AuthService
 from soulbot.services.config_service import ConfigService, Model, Settings
+from soulbot.services.llm_service import LLMService
 from soulbot.services.secret_service import SecretService
 from soulbot.storage.database import Database
 from soulbot.tools.registry import ToolRegistry
@@ -45,6 +50,8 @@ class Login(Model):
 class SecretUpdate(Model):
     llm_api_key: SecretStr | None = None
     onebot_access_token: SecretStr | None = None
+    llm_fallback_1: SecretStr | None = None
+    llm_fallback_2: SecretStr | None = None
 
 
 class Progress(Model):
@@ -64,6 +71,10 @@ class Services:
     running_config: Settings
     running_token_digest: str
     qq_runtime: bool = False
+    budget: BudgetService | None = None
+    llm: LLMService | None = None
+    agent: SoulBotAgent | None = None
+    qq_transport: object | None = None
 
 
 def build_services(root):
@@ -72,7 +83,7 @@ def build_services(root):
     (root / "logs").mkdir(exist_ok=True)
     config = ConfigService(root)
     db = Database(root / "data" / "soulbot.db")
-    return Services(
+    services = Services(
         root,
         config,
         SecretService(root),
@@ -84,6 +95,16 @@ def build_services(root):
         config.current.model_copy(deep=True),
         hashlib.sha256(SecretService(root).get("onebot_access_token").encode()).hexdigest(),
     )
+    services.budget = BudgetService(db)
+    services.llm = LLMService(
+        config, services.secrets, services.providers, services.budget, db.audit
+    )
+    services.agent = SoulBotAgent(config, db, services.llm)
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE llm_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
+        )
+    return services
 
 
 def create_web_app(root: Path, services=None):
@@ -91,7 +112,21 @@ def create_web_app(root: Path, services=None):
 
     services = services or build_services(root)
     s = services
-    app = FastAPI(title="SoulBot", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
+
+    @asynccontextmanager
+    async def lifespan(application):
+        yield
+        await s.agent.close()
+        await s.providers.close()
+
+    app = FastAPI(
+        title="SoulBot",
+        version=VERSION,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        lifespan=lifespan,
+    )
     app.state.services = s
     allowed_hosts = ["localhost", "127.0.0.1", "[::1]", "testserver"]
     allowed_hosts += [
@@ -124,6 +159,17 @@ def create_web_app(root: Path, services=None):
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    @app.exception_handler(ProviderError)
+    async def provider_error(request, exc):
+        code = (
+            422
+            if exc.kind in {"not_configured", "input_limit", "unsupported_capability"}
+            else 429
+            if exc.kind in {"budget", "task_budget", "unknown_cost", "rate_limit"}
+            else 502
+        )
+        return JSONResponse({"detail": str(exc), "kind": exc.kind}, status_code=code)
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, exc):
@@ -216,6 +262,8 @@ def create_web_app(root: Path, services=None):
     def save_config(settings: Settings):
         if settings.qq.enabled and not s.secrets.get("onebot_access_token"):
             raise HTTPException(422, "启用 QQ 接入前，请先保存 Access Token")
+        if settings.llm != s.config.current.llm:
+            s.db.set("llm_last_test", "")
         s.config.save(settings)
         s.db.audit("config_saved")
         return configuration()
@@ -228,6 +276,8 @@ def create_web_app(root: Path, services=None):
         if s.config.current.qq.enabled and values.get("onebot_access_token") == "":
             raise HTTPException(422, "请先停用 QQ 接入，再清除 Access Token")
         s.secrets.save(values)
+        if any(name.startswith("llm_") for name in values):
+            s.db.set("llm_last_test", "")
         s.db.audit("secrets_updated", ",".join(values))
         return {"secrets": s.secrets.status(), "restart_required": "onebot_access_token" in values}
 
@@ -273,10 +323,16 @@ def create_web_app(root: Path, services=None):
             "nonebot": s.qq_runtime,
             "qq_enabled": s.running_config.qq.enabled,
             "qq_connected": bool(get_bots()) if s.qq_runtime else False,
-            "llm": "尚未实现，M1 开放调用",
+            "llm": "已配置，调用状态请运行连接测试"
+            if s.llm.configured()
+            else "尚未配置模型或 API Key",
+            "llm_configured": s.llm.configured(),
+            "llm_last_test": json.loads(s.db.get("llm_last_test") or "null"),
+            "pending_conversations": len(s.agent.pending),
+            "usage": s.budget.summary(s.config.current),
             "meme_generator": "尚未安装，M2 集成",
             "restart_required": restart_required(),
-            "stage": "M0 · 基础架构",
+            "stage": "M1 · QQ 与基础 AI",
         }
 
     def get_bots():
@@ -289,9 +345,13 @@ def create_web_app(root: Path, services=None):
         # Read-only protocol probe. A WS handshake alone is not evidence of OneBot.
         import websockets
 
+        if s.qq_transport and s.qq_transport.connected():
+            return await s.qq_transport.status()
         target = s.config.current.qq.test_url
         if urlsplit(target).hostname not in {"127.0.0.1", "localhost", "::1"}:
-            raise HTTPException(422, "M0 测试仅支持本机地址；远程接入请等待 M1")
+            raise HTTPException(
+                422, "独立协议探测仅支持本机地址；远程 NapCat 可通过已连接的适配器检测"
+            )
         nonce = secrets.token_hex(8)
         token = s.secrets.get("onebot_access_token")
         headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -307,7 +367,7 @@ def create_web_app(root: Path, services=None):
                             ok = result.get("status") == "ok" and result.get("retcode") == 0
                             return {
                                 "ok": ok,
-                                "message": "OneBot get_status 已成功响应（仅协议检测，QQ消息尚未联调）"
+                                "message": "OneBot get_status 已成功响应；是否已登录 QQ 请检查 NapCat 状态"
                                 if ok
                                 else "OneBot 返回失败状态，请检查 NapCat 登录与 Token",
                             }
@@ -317,6 +377,10 @@ def create_web_app(root: Path, services=None):
                 "message": "未能收到有效 OneBot 响应。请启动 NapCat 并检查端口和 Token；若此地址是反向接收端，应在 NapCat 中填写 SoulBot 的接收地址。",
             }
         return {"ok": False, "message": "连接已建立，但未收到匹配的 OneBot get_status 回执"}
+
+    from soulbot.web.api.chat import install_chat_api
+
+    install_chat_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

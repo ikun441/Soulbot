@@ -9,7 +9,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Model(BaseModel):
@@ -63,9 +63,31 @@ class QQ(Model):
         return value
 
 
-class LLM(Model):
+class LLMEndpoint(Model):
     base_url: str = "https://api.openai.com/v1"
     model: str = Field(default="", max_length=120)
+    enabled: bool = True
+    timeout_seconds: float = Field(default=30, ge=1, le=120, allow_inf_nan=False)
+    retries: int = Field(default=1, ge=0, le=2)
+    context_window: int = Field(default=16384, ge=1024, le=2000000)
+    streaming: bool = False
+    supports_tools: bool = False
+    stream_usage: bool = False
+    max_output_field: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
+    input_price_cny_per_million: float | None = Field(
+        default=None, ge=0, le=100000, allow_inf_nan=False
+    )
+    output_price_cny_per_million: float | None = Field(
+        default=None, ge=0, le=100000, allow_inf_nan=False
+    )
+
+    @model_validator(mode="after")
+    def paired_prices(self):
+        if (self.input_price_cny_per_million is None) != (
+            self.output_price_cny_per_million is None
+        ):
+            raise ValueError("请同时填写输入和输出价格，或同时留空表示未知")
+        return self
 
     @field_validator("base_url")
     @classmethod
@@ -82,7 +104,27 @@ class LLM(Model):
             or parts.fragment
         ):
             raise ValueError("请输入不带密钥的 HTTP(S) API 地址")
+        try:
+            parts.port
+        except ValueError:
+            raise ValueError("端口号无效") from None
         return value.rstrip("/")
+
+
+class LLM(LLMEndpoint):
+    fallbacks: dict[Literal["fallback_1", "fallback_2"], LLMEndpoint] = Field(default_factory=dict)
+
+
+class RequestLimits(Model):
+    max_input_per_request: int = Field(default=8000, ge=256, le=128000)
+    max_output_per_request: int = Field(default=512, ge=16, le=8192)
+    max_per_agent_task: int = Field(default=12000, ge=512, le=300000)
+
+
+class GroupPolicy(Model):
+    enabled: bool = True
+    mode: Literal["silent", "mention_only", "natural", "active"] = "mention_only"
+    allow_proactive: bool = False
 
 
 class Personality(Model):
@@ -96,6 +138,22 @@ class Personality(Model):
 
 class Behavior(Model):
     group_mode: Literal["silent", "mention_only", "natural", "active"] = "mention_only"
+    private_chat: bool = True
+    proactive_group_enabled: bool = False
+    group_policies: dict[str, GroupPolicy] = Field(default_factory=dict)
+    group_allowlist: list[str] = Field(default_factory=list, max_length=500)
+    group_blocklist: list[str] = Field(default_factory=list, max_length=500)
+    ignored_bot_ids: list[str] = Field(default_factory=list, max_length=500)
+    wake_words: list[str] = Field(default_factory=list, max_length=10)
+    followup_window_seconds: int = Field(default=90, ge=0, le=300)
+    reply_cooldown_seconds: float = Field(default=8, ge=0, le=600, allow_inf_nan=False)
+    group_batch_seconds: float = Field(default=5, ge=0, le=15, allow_inf_nan=False)
+    private_batch_seconds: float = Field(default=0.4, ge=0, le=5, allow_inf_nan=False)
+    proactive_interval_seconds: int = Field(default=180, ge=180, le=86400)
+    max_proactive_per_day: int = Field(default=3, ge=0, le=10)
+    global_send_interval_seconds: float = Field(default=1, ge=0.1, le=10, allow_inf_nan=False)
+    context_turns: int = Field(default=8, ge=0, le=20)
+    context_retention_hours: int = Field(default=24, ge=1, le=168)
     autonomous: bool = False
     diary: bool = False
     qzone: bool = False
@@ -103,11 +161,25 @@ class Behavior(Model):
     daily_tokens: int = Field(default=300000, ge=1000, le=10000000)
     daily_cost_cny: float = Field(default=5, gt=0, le=10000, allow_inf_nan=False)
 
+    @field_validator("group_policies", "group_allowlist", "group_blocklist", "ignored_bot_ids")
+    @classmethod
+    def valid_ids(cls, value):
+        if len(value) > 500 or any(not re.fullmatch(r"[1-9][0-9]{4,11}", key) for key in value):
+            raise ValueError("请输入有效的 QQ / 群号，最多 500 项")
+        return value
+
+    @field_validator("wake_words")
+    @classmethod
+    def valid_wake_words(cls, value):
+        if any(not word.strip() or len(word) > 40 for word in value):
+            raise ValueError("唤醒词不能为空，且不能超过 40 字")
+        return value
+
     @field_validator("autonomous", "diary", "qzone")
     @classmethod
     def unavailable(cls, value):
         if value:
-            raise ValueError("当前 M0 版本尚未开放此功能，请等待对应阶段")
+            raise ValueError("当前版本尚未开放此功能，请等待对应阶段")
         return value
 
 
@@ -134,6 +206,7 @@ class Settings(Model):
     personality: Personality = Field(default_factory=Personality)
     behavior: Behavior = Field(default_factory=Behavior)
     appearance: Appearance = Field(default_factory=Appearance)
+    limits: RequestLimits = Field(default_factory=RequestLimits)
 
 
 def atomic_write(path: Path, content: str, mode=0o600):

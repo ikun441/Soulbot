@@ -21,10 +21,12 @@ def main():
         server = create_runtime(services)
         settings = services.running_config
         host = "127.0.0.1" if settings.web.host == "0.0.0.0" else settings.web.host
-        print(f"SoulBot {VERSION} · M0 基础架构", flush=True)
+        print(f"SoulBot {VERSION} · M1 QQ 与基础 AI", flush=True)
         print(f"WebUI：http://{host}:{settings.web.port}  |  Ctrl+C 停止", flush=True)
-        print("人格与情绪属于程序模拟。AI/QQ 消息功能将在 M1 开放。", flush=True)
+        print("人格与情绪属于程序模拟。配置模型和 NapCat 后即可进行文本聊天。", flush=True)
         server.run()
+    except KeyboardInterrupt:
+        print("SoulBot 已停止。")
     except (ValueError, OSError, yaml.YAMLError) as exc:
         # Do not print raw exception content: malformed config may contain secrets.
         print(f"启动失败（{type(exc).__name__}）：请检查 config.yaml、端口占用和 data 目录权限。")
