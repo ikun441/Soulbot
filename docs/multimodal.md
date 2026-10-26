@@ -1,4 +1,4 @@
-# 多模态工坊 · v0.9.4
+# 多模态工坊 · v0.9.5
 
 本页介绍 Emoji 和 meme-generator。HTML 卡片独立提供固定排版能力，见 [卡片工坊说明](html-render.md)；语音见 [语音工坊](tts.md)，云端自由生图接口见 [云端生图](image-generation.md)，真实服务尚待凭据验证。
 

@@ -1,4 +1,4 @@
-# 架构 · v0.9.4
+# 架构 · v0.9.5
 
 入口 main.py → 构建配置/SQLite/密钥/Registry 服务 → NoneBot2 FastAPI + HTTPX + WebSocket 驱动 → OneBot V11 适配器 → 挂载管理 WebUI。ASGI 外层网关在 QQ 关闭时拒绝 OneBot 请求。
 
@@ -10,6 +10,7 @@
 - services/secret_service：`.env`/环境变量与 0600 JSON 密钥，API 仅提供配置存在标记。
 - services/auth_service：加盐 PBKDF2、随机会话、会话摘要入库、失败登录限流。
 - storage/database：SQLite 事务、schema_version、管理员、会话、向导、审计。
+- core/emotion：五维全局情绪、六态状态机、时间恢复与最近 512 次变化；core/relationship：按机器人/群/用户隔离的好感度、互动和持久限额。
 - providers/registry：能力维度注册/解析，跨能力不能替代。
 - tools/registry：Pydantic 参数、默认拒绝权限、服务端调用上下文、超时与任务总次数限制、审计。
 - web/static：原生 HTML/CSS/JS；后台状态与表单均使用真实 API。
@@ -29,3 +30,7 @@ ASRService 与 TTSService 分开，能力 Registry 以 asr/tts 分类。ASR 先�
 
 ## 云端图片生成
 ImageGenerationService 按每次一张预留持久额度与共享费用。独立 image_generation Provider 只返回经验证的 Base64 图片，HTML Render 不参与故障替代；服务返回 URL 不下载。generate_image 的服务端上下文决定产物范围，发送执行器和管理端通用图片发送都会按来源再次检查开关/权限。
+
+## M3 状态路径
+
+Agent 在原有权限、过滤和预算流程中只读取当前会话关系及全局情绪，用于 system Prompt 的角色表达。成功完成直接/连续回复后才积累关系与情绪；主动插话、沉默、发送失败和管理试聊不奖励。去重只保存消息标识摘要，状态/关系表不保存聊天正文。管理员 API 使用修订号拒绝覆盖并发互动；模型没有修改这些状态的工具。schema v8 是向前追加表的迁移，升级前备份数据库；旧版程序会拒绝更高 schema。

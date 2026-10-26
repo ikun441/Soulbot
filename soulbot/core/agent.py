@@ -283,11 +283,17 @@ class SoulBotAgent:
         history = await asyncio.to_thread(
             self.conversation.history, event.scope, settings.behavior.context_turns
         )
+        emotion = getattr(self.services, "emotion", None)
+        relationships = getattr(self.services, "relationships", None)
+        emotion_state = await asyncio.to_thread(emotion.snapshot) if emotion else None
+        relationship = await asyncio.to_thread(relationships.get, event) if relationships else None
         messages = [
             system_prompt(
                 settings,
                 private=not event.group_id,
                 owner=event.user_id == settings.personality.owner_qq,
+                emotion=emotion_state,
+                relationship=relationship,
             ),
             *history,
             {"role": "user", "content": text},
@@ -329,6 +335,14 @@ class SoulBotAgent:
                 except Exception:
                     await asyncio.to_thread(self.db.audit, "image_send_failed", tool)
             if delivered:
+                if trigger != "proactive":
+                    try:
+                        if relationships:
+                            await asyncio.to_thread(relationships.interact, event)
+                        if emotion:
+                            await asyncio.to_thread(emotion.interact, event)
+                    except Exception:
+                        await asyncio.to_thread(self.db.audit, "social_state_failed", "update")
                 await asyncio.to_thread(
                     self.conversation.remember,
                     event.scope,

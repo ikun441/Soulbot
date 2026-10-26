@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 7:
+            if version > 8:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -146,5 +146,35 @@ class Database:
                         error_kind TEXT);
                     CREATE INDEX IF NOT EXISTS image_usage_day ON image_usage(day,created_at);
                     UPDATE metadata SET value='7' WHERE key='schema_version';
+                    COMMIT;
+                """)
+            if version < 8:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS emotion_state (
+                        id INTEGER PRIMARY KEY CHECK(id=1), values_json TEXT NOT NULL,
+                        state TEXT NOT NULL, updated_at REAL NOT NULL,
+                        state_since REAL NOT NULL, last_interaction_at REAL,
+                        revision INTEGER NOT NULL DEFAULT 0, policy_key TEXT NOT NULL);
+                    CREATE TABLE IF NOT EXISTS emotion_history (
+                        id INTEGER PRIMARY KEY, created_at REAL NOT NULL,
+                        previous_state TEXT NOT NULL, state TEXT NOT NULL,
+                        reason TEXT NOT NULL, values_json TEXT NOT NULL);
+                    CREATE TABLE IF NOT EXISTS relationships (
+                        id INTEGER PRIMARY KEY, bot_id TEXT NOT NULL, user_id TEXT NOT NULL,
+                        group_id TEXT NOT NULL DEFAULT '', display_name TEXT NOT NULL DEFAULT '',
+                        affinity INTEGER NOT NULL DEFAULT 0 CHECK(affinity BETWEEN -100 AND 100),
+                        automatic INTEGER NOT NULL DEFAULT 1,
+                        interactions INTEGER NOT NULL DEFAULT 0, last_interaction_at REAL,
+                        last_reward_at REAL, reward_day TEXT NOT NULL DEFAULT '',
+                        daily_gain INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL,
+                        revision INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE(bot_id,group_id,user_id));
+                    CREATE INDEX IF NOT EXISTS relationships_user ON relationships(user_id,id);
+                    CREATE TABLE IF NOT EXISTS social_observations (
+                        key TEXT PRIMARY KEY, created_at REAL NOT NULL);
+                    CREATE INDEX IF NOT EXISTS social_observations_time
+                        ON social_observations(created_at);
+                    UPDATE metadata SET value='8' WHERE key='schema_version';
                     COMMIT;
                 """)

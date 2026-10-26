@@ -71,7 +71,9 @@ def install_chat_api(app, s, authorized):
             raise HTTPException(422, "请输入聊天内容")
         settings = s.config.current
         messages = [
-            system_prompt(settings, web=True, owner=True),
+            system_prompt(
+                settings, web=True, owner=True, emotion=await asyncio.to_thread(s.emotion.snapshot)
+            ),
             *[turn.model_dump() for turn in data.history],
             {"role": "user", "content": data.text},
         ]

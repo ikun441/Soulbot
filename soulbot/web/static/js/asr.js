@@ -1,25 +1,27 @@
 import {providerRequestErrorText, providerStatusText} from './provider-guidance.js';
-let controller=null,timer=null;
+import {createPageSession} from './page-session.js';
+let session=null;
 const $=selector=>document.querySelector(selector);
-export function stopASRUI(){controller?.abort();controller=null;clearInterval(timer);timer=null;}
+export function stopASRUI(){session?.dispose();session=null;}
 
 export async function asrPage(ctx){
  const {mount,heading,field,toggle,select,secret,api,send,guarded,notice,confirmAction,saveEditor,config}=ctx;
  mount(`${heading('LISTEN & UNDERSTAND','把声音，轻轻听懂。','录音转写成文字，再由你决定如何使用。')}<form id="editor" class="panel">${toggle('启用语音识别','asr.enabled','默认关闭。转写可能有误，请核对姓名、数字与重要内容。')}${select('识别方式','asr.provider',[['local','本地 Whisper base（CPU）'],['openai_compatible','OpenAI 兼容转写接口']])}<div id="asr-cloud"><div class="note">云端识别会将完整录音发送至你配置的服务商。请确认已取得录音相关人员的授权。</div><div class="form-grid">${field('ASR Base URL','asr.base_url','与聊天、语音合成配置独立。','url','required')}${field('识别模型 ID','asr.model','按服务商文档填写，不硬编码模型列表。','text','maxlength="120"')}${secret('ASR API Key','asr_api_key','独立保存；留空保留已有值，不复用其它服务密钥。')}${field('价格（元 / 音频分钟）','asr.price_cny_per_minute','按 Token 或其它方式计费请留空，显示未知费用。','number','min="0" max="1000" step="any" data-nullable="true"')}</div></div><div class="form-grid">${field('录音语言','asr.language','例如 zh 或 en；留空由识别服务判断。','text','pattern="[a-z]{2}|" maxlength="2"')}${field('单段最长时长（秒）','asr.max_duration_seconds','只接受实际 MP3 或 PCM WAV，最多 8MB。','number','min="1" max="180" required')}${field('识别超时（秒）','asr.timeout_seconds','','number','min="5" max="180" required')}</div>${toggle('处理 QQ 语音','asr.qq_enabled','单独授权；当前需反向 WebSocket。私聊需允许接入，群聊仅处理明确 @ 或回复机器人的语音，静默/禁用/冷却时不识别。') }<details class="advanced"><summary>每日额度与频率</summary><div class="form-grid">${field('每分钟识别次数','asr.max_calls_per_minute','','number','min="1" max="20" required')}${field('每日识别次数','asr.max_calls_per_day','失败尝试也计次数；重启不清零。','number','min="1" max="1000" required')}${field('每日音频秒数','asr.max_seconds_per_day','独立于模型 Token 与合成字符；共用人民币预算。','number','min="60" max="86400" required')}</div></details><div class="actions"><button id="save" class="button primary">保存识别配置</button></div></form><section class="panel media-section" id="asr-local"><h2>准备本地模型</h2><p class="row-detail">Whisper base 多语言模型，约 150MB，下载到项目 data/asr。本机 CPU int8 识别，不需要 GPU 或系统 FFmpeg；识别期间不上传录音。首次加载和长录音可能较慢。</p><p id="asr-model-status" class="note" aria-live="polite">正在读取状态…</p><div class="actions"><button id="asr-prepare" class="button outline">下载 / 检查本地模型</button><button id="asr-prepare-cancel" class="button quiet" disabled>取消准备</button></div></section><p id="asr-provider-diagnostic" class="note" aria-live="polite"></p><section class="panel media-section" data-transient><form id="asr-form"><div class="field"><label for="asr-file">选择录音</label><input id="asr-file" type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" required><small>上传后临时处理，不建立录音或转写历史。云端识别可能计费，取消后请核对费用记录。</small></div><div class="actions"><button class="button primary" type="submit">保存并转写录音</button><button id="asr-cancel" class="button quiet" type="button" disabled>取消转写</button></div></form><p id="asr-result-state" class="note" aria-live="polite">还没有转写结果。</p><div class="field"><label for="asr-result">识别文字</label><textarea id="asr-result" readonly rows="5"></textarea></div><p class="row-detail">此测试不会发送 QQ，也不会自动请求聊天模型。QQ 转写文字只进入原有会话隔离和短期上下文。</p></section>`);
+ const lifecycle=createPageSession($('#asr-form'));session=lifecycle;
  const provider=document.querySelector('[data-field="asr.provider"]');
  const update=()=>{$('#asr-cloud').hidden=provider.value!=='openai_compatible';$('#asr-local').hidden=provider.value!=='local';};update();provider.onchange=update;
- async function poll(){const node=$('#asr-model-status');if(!node)return;const value=await api('/api/asr/status');if(!node.isConnected)return;node.textContent=value.local_ready?'本地 Whisper base 已准备，可以上传测试。':value.message;const test=value.provider_test,diagnostic=$('#asr-provider-diagnostic');diagnostic.textContent=providerStatusText(test,'ASR')+' 云端测试会发送录音并可能计费；本地测试只在本机处理。';diagnostic.classList.toggle('warning',test.state==='failed');$('#asr-prepare').disabled=value.preparing||value.active>0;$('#asr-prepare-cancel').disabled=!value.preparing;}
+ async function poll(){if(!lifecycle.active())return;const value=await api('/api/asr/status');if(!lifecycle.active())return;const node=$('#asr-model-status');node.textContent=value.local_ready?'本地 Whisper base 已准备，可以上传测试。':value.message;const test=value.provider_test,diagnostic=$('#asr-provider-diagnostic');diagnostic.textContent=providerStatusText(test,'ASR')+' 云端测试会发送录音并可能计费；本地测试只在本机处理。';diagnostic.classList.toggle('warning',test.state==='failed');$('#asr-prepare').disabled=value.preparing||value.active>0;$('#asr-prepare-cancel').disabled=!value.preparing;}
  $('#asr-prepare').onclick=()=>confirmAction('准备本地 Whisper 模型？','会从官方 Systran 模型仓库下载固定版本约 150MB 文件到本项目，随后检查 CPU 加载。不会启用 QQ 识别或上传录音。',async()=>{await send('/api/asr/action','POST',{action:'prepare'});await poll();});
  $('#asr-prepare-cancel').onclick=e=>guarded(async()=>{await send('/api/asr/action','POST',{action:'cancel'});await poll();notice('模型准备已取消');},e.currentTarget);
- $('#asr-cancel').onclick=()=>controller?.abort();
- $('#asr-form').onsubmit=e=>{e.preventDefault();guarded(async()=>{
-  if(!await saveEditor())return;if(!config().asr.enabled)throw new Error('请先启用语音识别');
+ $('#asr-cancel').onclick=()=>lifecycle.cancel();
+ $('#asr-form').onsubmit=e=>{e.preventDefault();if(lifecycle.busy)return;guarded(()=>lifecycle.run(async signal=>{
+  if(!await saveEditor()||!lifecycle.active()||signal.aborted)return;if(!config().asr.enabled)throw new Error('请先启用语音识别');
   const file=$('#asr-file').files[0];if(!file||file.size>8*1024*1024)throw new Error('请选择不超过 8MB 的 MP3 或 WAV');
   const state=$('#asr-result-state'),result=$('#asr-result'),cancel=$('#asr-cancel');result.value='';state.textContent='正在识别录音…';cancel.disabled=false;
-  controller=new AbortController();const data=new FormData();data.append('file',file);
-  try{const value=await api('/api/asr/transcribe',{method:'POST',body:data,signal:controller.signal});if(!state.isConnected)return;result.value=value.text;state.textContent=value.text?`识别完成 · ${value.duration.toFixed(2)} 秒 · 语言 ${value.language||'自动'}，请核对内容。`:'未识别到有效文字，可换一段清晰录音重试。';}
-  catch(error){if(state.isConnected)state.textContent=error.name==='AbortError'?'已停止等待。云端请求可能已计费，请先核对费用页。':providerRequestErrorText(error);if(error.name!=='AbortError')throw error;}
-  finally{controller=null;if(cancel.isConnected)cancel.disabled=true;await poll().catch(()=>{});}
- },e.submitter);};
- await poll();if($('#asr-model-status'))timer=setInterval(()=>poll().catch(()=>{}),3000);
+  const data=new FormData();data.append('file',file);const local=config().asr.provider==='local';
+  try{const value=await api('/api/asr/transcribe',{method:'POST',body:data,signal});if(!lifecycle.active())return;result.value=value.text;state.textContent=value.text?`识别完成 · ${value.duration.toFixed(2)} 秒 · 语言 ${value.language||'自动'}，请核对内容。`:'未识别到有效文字，可换一段清晰录音重试。';}
+  catch(error){if(lifecycle.active()){state.textContent=error.name==='AbortError'?(local?'已停止等待本地识别，录音未上传到云端。':'已停止等待。云端请求可能已计费，请先核对费用页。'):providerRequestErrorText(error);if(error.name!=='AbortError')throw error;}}
+  finally{if(lifecycle.active())cancel.disabled=true;await poll().catch(()=>{});}
+ }),e.submitter);};
+ await poll();lifecycle.repeat(poll,3000);
 }

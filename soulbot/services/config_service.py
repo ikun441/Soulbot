@@ -409,6 +409,40 @@ class ImageGenerationSettings(Model):
         return value
 
 
+class EmotionValues(Model):
+    valence: float = Field(default=60, ge=0, le=100, allow_inf_nan=False)
+    energy: float = Field(default=55, ge=0, le=100, allow_inf_nan=False)
+    curiosity: float = Field(default=60, ge=0, le=100, allow_inf_nan=False)
+    sociability: float = Field(default=50, ge=0, le=100, allow_inf_nan=False)
+    fatigue: float = Field(default=10, ge=0, le=100, allow_inf_nan=False)
+
+
+class EmotionSettings(Model):
+    enabled: bool = True
+    automatic: bool = True
+    baseline: EmotionValues = Field(default_factory=EmotionValues)
+    recovery_half_life_minutes: float = Field(default=180, ge=5, le=10080, allow_inf_nan=False)
+    interaction_cooldown_seconds: int = Field(default=60, ge=10, le=3600)
+    high_threshold: float = Field(default=75, ge=60, le=95, allow_inf_nan=False)
+    low_threshold: float = Field(default=25, ge=5, le=40, allow_inf_nan=False)
+    hysteresis: float = Field(default=10, ge=1, le=20, allow_inf_nan=False)
+    min_state_seconds: int = Field(default=60, ge=0, le=3600)
+
+    @model_validator(mode="after")
+    def separate_thresholds(self):
+        if self.low_threshold + self.hysteresis >= self.high_threshold - self.hysteresis:
+            raise ValueError("情绪高低阈值之间需要保留足够的滞回区间")
+        return self
+
+
+class RelationshipSettings(Model):
+    enabled: bool = True
+    automatic: bool = True
+    affinity_per_interaction: int = Field(default=1, ge=1, le=5)
+    reward_cooldown_seconds: int = Field(default=300, ge=60, le=86400)
+    max_daily_gain: int = Field(default=5, ge=1, le=20)
+
+
 class Settings(Model):
     soulbot: Identity = Field(default_factory=Identity)
     web: Web = Field(default_factory=Web)
@@ -425,6 +459,8 @@ class Settings(Model):
     tts: SpeechSettings = Field(default_factory=SpeechSettings)
     asr: ASRSettings = Field(default_factory=ASRSettings)
     image_generation: ImageGenerationSettings = Field(default_factory=ImageGenerationSettings)
+    emotion: EmotionSettings = Field(default_factory=EmotionSettings)
+    relationships: RelationshipSettings = Field(default_factory=RelationshipSettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):

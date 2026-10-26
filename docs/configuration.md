@@ -1,4 +1,4 @@
-# 配置说明 · v0.9.4
+# 配置说明 · v0.9.5
 
 普通用户通过 WebUI 配置，不需要手改 YAML。首次启动自动生成 config.yaml，实际字段以 `Settings.model_json_schema()` 为准，登录后可访问 `/api/config/schema`。v0.3.0 会把旧数据库迁移到 schema v4，保留账户、额度和上下文，并增加表情索引、图片产物及会话范围；升级前按启动文档备份。
 
@@ -9,6 +9,8 @@
 | qq | enabled、connection、test_url、reverse_ws_url（反向地址保存到 .env，重启生效） |
 | llm | OpenAI兼容 base_url/model、重试、流式、显式能力、备用服务、价格 |
 | personality | description、style、interests、owner_qq、owner_title、prompt |
+| emotion | enabled、automatic、五维 baseline、恢复半衰期、互动冷却、高低阈值、滞回宽度与最短状态停留时间 |
+| relationships | enabled、automatic、每次好感增加值、奖励冷却与每条关系每日增长上限 |
 | behavior | 群聊模式、过滤/聚合/冷却、群级策略、免打扰、上下文、每日 Token/费用限制；autonomous/diary/qzone 当前必须 false |
 | appearance | motion、wallpaper、wallpaper_kind |
 | limits | 每次输入/输出、每个 Agent 任务总 Token；工具 Schema 和所有模型轮次均计入 |
@@ -26,6 +28,10 @@ WebUI 账号使用 `.env` 中的 `SOULBOT_WEBUI_USERNAME`、`SOULBOT_WEBUI_PASSW
 QQ 必须有 Token 才能启用。Token 修改需要重启。密钥不会出现在 YAML、GET 配置或导出中。导出还会清空主人 QQ，但不自动审查用户填写的 Prompt，请自行检查。
 
 备份/数据库均为私密文件。完整备份应停止程序并复制 config.yaml、data 和实际 .env，详见 start.md。
+
+## 好感与模拟情绪
+
+规则经相同 Pydantic Schema 保存到 YAML 并热更新。当前情绪、关系分数、称呼、修订号、冷却与每日增长存在 SQLite，配置导出不包含这些运行数据。管理页面可编辑当前数值、冻结自动变化和重置情绪；修改规则不清空状态。详见 [M3 状态说明](social-state.md)。v0.9.5 自动迁移到 schema v8；升级前备份，回退程序需恢复兼容版本的备份。
 
 ## 语音设置
 `tts` 与聊天模型配置独立，默认关闭。密钥使用 `SOULBOT_TTS_API_KEY`，普通读取仅返回配置状态。音色、语速、字符/调用上限和兼容服务参数均可在语音工坊热更新，详见 [TTS 说明](tts.md)。

@@ -24,7 +24,10 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from soulbot import VERSION
 from soulbot.core.agent import SoulBotAgent
 from soulbot.core.budget import BudgetService
+from soulbot.core.emotion import EmotionEngine
 from soulbot.core.permissions import PermissionEngine
+from soulbot.core.relationship import RelationshipEngine
+from soulbot.core.social_state import StateConflict
 from soulbot.providers.llm.base import ProviderError
 from soulbot.providers.registry import ProviderRegistry
 from soulbot.services.asr_service import ASRService
@@ -94,6 +97,8 @@ class Services:
     recognition: ASRService | None = None
     images: ImageGenerationService | None = None
     diagnostics: ProviderDiagnostics | None = None
+    emotion: EmotionEngine | None = None
+    relationships: RelationshipEngine | None = None
 
 
 def build_services(root):
@@ -117,6 +122,8 @@ def build_services(root):
         hashlib.sha256(secrets_service.get("onebot_access_token").encode()).hexdigest(),
     )
     services.budget = BudgetService(db)
+    services.emotion = EmotionEngine(config, db)
+    services.relationships = RelationshipEngine(config, db)
     services.diagnostics = ProviderDiagnostics()
     services.llm = LLMService(
         config,
@@ -250,6 +257,10 @@ def create_web_app(root: Path, services=None):
         if hasattr(exc, "uncertain"):
             result["uncertain"] = bool(exc.uncertain)
         return JSONResponse(result, status_code=422)
+
+    @app.exception_handler(StateConflict)
+    async def state_conflict(request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=409)
 
     @app.exception_handler(EnvironmentError)
     async def environment_error(request, exc):
@@ -446,7 +457,8 @@ def create_web_app(root: Path, services=None):
             "usage": s.budget.summary(s.config.current),
             "meme_generator": s.meme.status(),
             "restart_required": restart_required(),
-            "stage": "M2 · 图片、卡片与语音",
+            "stage": "M3 · 好感度与全局模拟情绪",
+            "emotion": s.emotion.snapshot(),
         }
 
     @app.get("/api/providers/status", dependencies=[Depends(authorized)])
@@ -517,6 +529,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.image import install_image_api
 
     install_image_api(app, s, authorized)
+    from soulbot.web.api.social import install_social_api
+
+    install_social_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():
