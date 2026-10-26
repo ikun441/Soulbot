@@ -157,9 +157,11 @@ def test_environment_secret_precedence(tmp_path, monkeypatch):
     assert secrets.get("llm_api_key") == "from-env"
 
 
-def test_qq_requires_token(admin):
+def test_qq_allows_loopback_without_token_but_protects_remote(admin):
     data = admin.get("/api/config").json()["config"]
     data["qq"]["enabled"] = True
+    assert admin.put("/api/config", json=data).status_code == 200
+    data["web"]["host"] = "0.0.0.0"
     assert admin.put("/api/config", json=data).status_code == 422
     assert (
         admin.put("/api/secrets", json={"onebot_access_token": "local-test-token"}).status_code
@@ -305,6 +307,7 @@ def test_qq_probe_reports_unavailable(admin):
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     config = admin.get("/api/config").json()["config"]
+    config["qq"]["connection"] = "forward"
     config["qq"]["test_url"] = f"ws://127.0.0.1:{port}/onebot/v11/ws"
     admin.put("/api/config", json=config)
     r = admin.post("/api/qq/test")
@@ -335,3 +338,51 @@ def test_unicode_login_name_is_rejected_cleanly(admin):
         "/api/auth/login", json={"username": "不存在的用户", "password": ACCOUNT["password"]}
     )
     assert result.status_code == 401
+
+
+def test_reverse_connection_check_does_not_probe_its_own_receiver(admin, monkeypatch):
+    import websockets
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Reverse receiver must not be probed as a NapCat server")
+
+    monkeypatch.setattr(websockets, "connect", unexpected)
+    result = admin.post("/api/qq/test")
+    assert result.status_code == 200 and not result.json()["ok"]
+    assert result.json()["receiver_url"].endswith("/onebot/v11/ws")
+    assert "反向连接" in result.json()["message"]
+
+
+def test_tokenless_gate_rejects_remote_peer():
+    import hashlib
+    from types import SimpleNamespace
+
+    from soulbot.adapters.onebot_v11 import OneBotGate
+
+    settings = Settings()
+    settings.qq.enabled = True
+    services = SimpleNamespace(
+        running_config=settings, running_token_digest=hashlib.sha256(b"").hexdigest()
+    )
+    sent = []
+
+    async def inner(scope, receive, send):
+        raise AssertionError("Remote peer cannot use tokenless adapter")
+
+    async def send(event):
+        sent.append(event)
+
+    asyncio.run(
+        OneBotGate(inner, services)(
+            {"type": "websocket", "path": "/onebot/v11/ws", "client": ("192.0.2.9", 12345)},
+            None,
+            send,
+        )
+    )
+    assert sent == [{"type": "websocket.close", "code": 1008}]
+
+
+def test_remote_forward_connection_still_requires_token(admin):
+    data = admin.get("/api/config").json()["config"]
+    data["qq"].update(enabled=True, connection="forward", test_url="wss://napcat.example.org/ws")
+    assert admin.put("/api/config", json=data).status_code == 422

@@ -375,8 +375,12 @@ def create_web_app(root: Path, services=None):
 
     @app.put("/api/config", dependencies=[Depends(authorized)])
     async def save_config(settings: Settings):
-        if settings.qq.enabled and not s.secrets.get("onebot_access_token"):
-            raise HTTPException(422, "启用 QQ 接入前，请先保存 Access Token")
+        if (
+            settings.qq.enabled
+            and settings.qq.requires_token(settings.web)
+            and not s.secrets.get("onebot_access_token")
+        ):
+            raise HTTPException(422, "非本机 QQ 接入前，请先保存 Access Token")
         if settings.llm != s.config.current.llm:
             s.db.set("llm_last_test", "")
         previous = s.config.current
@@ -392,7 +396,11 @@ def create_web_app(root: Path, services=None):
         values = {k: v.get_secret_value() for k, v in changes if v is not None}
         if any(len(v) > 16384 for v in values.values()):
             raise HTTPException(422, "密钥长度超出限制")
-        if s.config.current.qq.enabled and values.get("onebot_access_token") == "":
+        if (
+            s.config.current.qq.enabled
+            and s.config.current.qq.requires_token(s.config.current.web)
+            and values.get("onebot_access_token") == ""
+        ):
             raise HTTPException(422, "请先停用 QQ 接入，再清除 Access Token")
         s.secrets.save(values)
         if any(name.startswith("llm_") for name in values):
@@ -483,6 +491,13 @@ def create_web_app(root: Path, services=None):
 
         if s.qq_transport and s.qq_transport.connected():
             return await s.qq_transport.status()
+        if s.config.current.qq.connection == "reverse":
+            return {
+                "ok": False,
+                "message": "尚未收到 NapCat 反向连接。请在 NapCat 的 WS 客户端启用下方接收地址；保存监听端口或 QQ 设置后需重启 SoulBot。",
+                "receiver_url": s.config.current.qq.receiver_url(s.config.current.web),
+                "restart_required": restart_required(),
+            }
         target = s.config.current.qq.test_url
         if urlsplit(target).hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise HTTPException(

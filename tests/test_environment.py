@@ -218,7 +218,8 @@ def test_invalid_reverse_ws_env_is_rejected_without_echoing_url(tmp_path, url):
     assert "private-" not in str(caught.value)
 
 
-def test_real_nonebot_accepts_env_custom_reverse_path_and_enforces_token(tmp_path):
+@pytest.mark.parametrize("access_token", ["isolated-ws-token", ""])
+def test_real_nonebot_accepts_env_custom_reverse_path_and_enforces_token(tmp_path, access_token):
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
@@ -234,7 +235,7 @@ def test_real_nonebot_accepts_env_custom_reverse_path_and_enforces_token(tmp_pat
         }
     )
     with (tmp_path / ".env").open("a") as stream:
-        stream.write("SOULBOT_ONEBOT_ACCESS_TOKEN=isolated-ws-token\n")
+        stream.write(f"SOULBOT_ONEBOT_ACCESS_TOKEN={access_token}\n")
     environment = {**os.environ, "SOULBOT_HOME": str(tmp_path)}
     project = Path(__file__).resolve().parents[1]
     with (tmp_path / "runtime.log").open("w") as log:
@@ -266,22 +267,23 @@ def test_real_nonebot_accepts_env_custom_reverse_path_and_enforces_token(tmp_pat
                     assert (await client.post("/api/auth/login", json=ACCOUNT)).status_code == 200
                     data = (await client.get("/api/config")).json()
                     url = data["qq_reverse_ws_url"]
-                    with pytest.raises(InvalidStatus) as rejected:
-                        async with websockets.connect(
-                            url,
-                            additional_headers={
-                                "X-Self-ID": "123456789",
-                                "Authorization": "Bearer wrong-token",
-                            },
-                            proxy=None,
-                        ):
-                            pass
-                    assert rejected.value.response.status_code == 403
+                    if access_token:
+                        with pytest.raises(InvalidStatus) as rejected:
+                            async with websockets.connect(
+                                url,
+                                additional_headers={
+                                    "X-Self-ID": "123456789",
+                                    "Authorization": "Bearer wrong-token",
+                                },
+                                proxy=None,
+                            ):
+                                pass
+                        assert rejected.value.response.status_code == 403
                     async with websockets.connect(
                         url,
                         additional_headers={
                             "X-Self-ID": "123456789",
-                            "Authorization": "Bearer isolated-ws-token",
+                            **({"Authorization": "Bearer " + access_token} if access_token else {}),
                         },
                         proxy=None,
                     ) as ws:
@@ -306,7 +308,11 @@ def test_real_nonebot_accepts_env_custom_reverse_path_and_enforces_token(tmp_pat
                             url,
                             additional_headers={
                                 "X-Self-ID": "123456790",
-                                "Authorization": "Bearer isolated-ws-token",
+                                **(
+                                    {"Authorization": "Bearer " + access_token}
+                                    if access_token
+                                    else {}
+                                ),
                             },
                             proxy=None,
                         ):

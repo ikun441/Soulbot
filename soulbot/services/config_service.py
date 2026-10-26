@@ -65,6 +65,14 @@ class QQ(Model):
             )
         return value
 
+    def requires_token(self, web):
+        from urllib.parse import urlsplit
+
+        local = {"127.0.0.1", "localhost", "::1"}
+        return web.host not in local or (
+            self.connection == "forward" and urlsplit(self.test_url).hostname not in local
+        )
+
     def receiver_url(self, web):
         host = web.host if web.host != "0.0.0.0" else "127.0.0.1"
         if ":" in host:

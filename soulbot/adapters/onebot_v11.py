@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import hashlib
 import re
 import secrets
 from urllib.parse import urlsplit
@@ -121,8 +122,16 @@ class OneBotGate:
             scope.get("path", "").startswith("/onebot/") or custom_reverse
         ):
             current = getattr(self.services, "config", None)
-            if not self.services.running_config.qq.enabled or (
-                current and not current.current.qq.enabled
+            tokenless_remote = getattr(
+                self.services, "running_token_digest", None
+            ) == hashlib.sha256(b"").hexdigest() and (scope.get("client") or ("", 0))[0] not in {
+                "127.0.0.1",
+                "::1",
+            }
+            if (
+                not self.services.running_config.qq.enabled
+                or tokenless_remote
+                or (current and not current.current.qq.enabled)
             ):
                 if scope["type"] == "websocket":
                     await send({"type": "websocket.close", "code": 1008})
@@ -138,8 +147,8 @@ class OneBotGate:
 def create_runtime(services):
     settings = services.running_config
     token = services.secrets.get("onebot_access_token")
-    if settings.qq.enabled and not token:
-        raise ValueError("启用 QQ 适配器需要 Access Token，请先在 WebUI 中设置")
+    if settings.qq.enabled and not token and settings.qq.requires_token(settings.web):
+        raise ValueError("非本机 QQ 接入需要 Access Token，请先在 WebUI 中设置")
     urls = (
         [settings.qq.test_url]
         if settings.qq.enabled and settings.qq.connection == "forward"
@@ -149,7 +158,7 @@ def create_runtime(services):
         driver="~fastapi+~httpx+~websockets",
         host=settings.web.host,
         port=settings.web.port,
-        onebot_access_token=token or secrets.token_urlsafe(32),
+        onebot_access_token=token or (None if settings.qq.enabled else secrets.token_urlsafe(32)),
         onebot_ws_urls=urls,
         log_level="WARNING",
         _env_file=None,
