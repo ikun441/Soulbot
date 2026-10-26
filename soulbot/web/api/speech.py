@@ -24,6 +24,7 @@ def install_speech_api(app, s, authorized):
         return {
             "enabled": s.config.current.tts.enabled,
             "configured": s.speech.configured(),
+            "provider_test": s.speech.test_status(),
             "provider": s.config.current.tts.provider,
             "active": len(s.speech.jobs),
             "usage": s.budget.summary(s.config.current)["tts"],

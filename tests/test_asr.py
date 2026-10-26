@@ -95,6 +95,7 @@ def test_asr_api_auth_actual_content_and_no_persisted_transcript(services, tmp_p
         )
         assert result.status_code == 200 and result.json()["text"] == "私有测试文字"
         assert result.json()["duration"] == 0.1
+        assert client.get("/api/providers/status").json()["asr"]["state"] == "available"
         assert (
             client.post("/api/asr/transcribe", files={"file": ("x.wav", b"bad")}).status_code == 422
         )

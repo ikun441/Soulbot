@@ -1,4 +1,4 @@
-# 配置说明 · v0.9.1
+# 配置说明 · v0.9.2
 
 普通用户通过 WebUI 配置，不需要手改 YAML。首次启动自动生成 config.yaml，实际字段以 `Settings.model_json_schema()` 为准，登录后可访问 `/api/config/schema`。v0.3.0 会把旧数据库迁移到 schema v4，保留账户、额度和上下文，并增加表情索引、图片产物及会话范围；升级前按启动文档备份。
 

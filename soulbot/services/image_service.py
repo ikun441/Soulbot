@@ -47,12 +47,15 @@ class ImageGenerationService:
         policy = settings.image_generation
         configured = self.configured()
         if not policy.enabled:
+            self.last_test = None
             state = "disabled"
         elif not configured:
+            self.last_test = None
             state = "unconfigured"
         elif self.last_test is None or self.last_test["fingerprint"] != self._provider_fingerprint(
             settings
         ):
+            self.last_test = None
             state = "not_tested"
         else:
             state = "available" if self.last_test["ok"] else "failed"

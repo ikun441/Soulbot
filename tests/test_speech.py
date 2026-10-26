@@ -227,6 +227,7 @@ def test_speech_api_auth_preview_no_key_echo_and_no_connected_qq(services, tmp_p
         )
         result = client.post("/api/tts/synthesize", json={"text": "测试文字"})
         assert result.status_code == 200
+        assert client.get("/api/providers/status").json()["tts"]["state"] == "available"
         item = result.json()
         response = client.get(item["url"])
         assert response.content == wav() and response.headers["content-type"] == "audio/wav"

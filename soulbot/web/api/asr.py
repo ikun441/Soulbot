@@ -22,6 +22,7 @@ def install_asr_api(app, s, authorized):
             "enabled": s.config.current.asr.enabled,
             "qq_enabled": s.config.current.asr.qq_enabled,
             "configured": s.recognition.configured(),
+            "provider_test": s.recognition.test_status(),
             "provider": s.config.current.asr.provider,
             "local_ready": local.ready(),
             "preparing": bool(local.task and not local.task.done()),

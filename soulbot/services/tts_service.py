@@ -10,13 +10,34 @@ from soulbot.providers.tts.openai_compatible import OpenAICompatibleTTSProvider
 
 
 class TTSService:
-    def __init__(self, config, secrets, registry, budget, db):
+    def __init__(self, config, secrets, registry, budget, db, diagnostics):
         self.config, self.registry, self.budget, self.db = config, registry, budget, db
         registry.register("tts", "edge", EdgeTTSProvider(), default=True)
         registry.register("tts", "openai_compatible", OpenAICompatibleTTSProvider(secrets))
         self.secrets = secrets
+        self.diagnostics = diagnostics
         self.jobs = set()
         self.closed = False
+
+    def test_inputs(self):
+        settings = self.config.current.tts.model_copy(deep=True)
+        secret = (
+            self.secrets.get("tts_api_key") if settings.provider == "openai_compatible" else None
+        )
+        return settings, secret
+
+    def test_status(self):
+        settings, secret = self.test_inputs()
+        return self.diagnostics.status(
+            "tts",
+            settings,
+            secret,
+            enabled=settings.enabled,
+            configured=self.configured(),
+        )
+
+    def record_test(self, settings, secret, *, ok, error_kind=None):
+        self.diagnostics.record("tts", settings, secret, ok=ok, error_kind=error_kind)
 
     def configured(self):
         settings = self.config.current.tts
@@ -82,6 +103,7 @@ class TTSService:
         task = asyncio.current_task()
         self.jobs.add(task)
         key = None
+        secret = self.secrets.get("tts_api_key") if policy.provider == "openai_compatible" else None
         try:
             # Synchronous short transaction avoids cancellation leaking a reservation.
             key = self.reserve(settings, text, purpose)
@@ -90,24 +112,29 @@ class TTSService:
                 result = await provider.synthesize(text, policy)
             if result.duration > policy.max_duration_seconds:
                 raise SpeechError("duration", "返回语音超过配置的时长上限", uncertain=True)
+            self.record_test(policy, secret, ok=True)
             self.finish(key, "completed")
             return result
         except asyncio.CancelledError:
             if key:
+                self.record_test(policy, secret, ok=False, error_kind="cancelled")
                 self.finish(key, "uncertain", "cancelled")
             raise
         except TimeoutError:
             if key:
+                self.record_test(policy, secret, ok=False, error_kind="timeout")
                 self.finish(key, "uncertain", "timeout")
             raise SpeechError(
                 "timeout", "语音生成超时；服务商可能已产生费用", uncertain=True
             ) from None
         except SpeechError as error:
             if key:
+                self.record_test(policy, secret, ok=False, error_kind=error.kind)
                 self.finish(key, "uncertain" if error.uncertain else "rejected", error.kind)
             raise
         except Exception:
             if key:
+                self.record_test(policy, secret, ok=False, error_kind="internal")
                 self.finish(key, "uncertain", "internal")
             raise SpeechError(
                 "internal", "语音生成未完成，请检查服务配置", uncertain=True

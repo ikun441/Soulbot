@@ -37,24 +37,24 @@ def install_chat_api(app, s, authorized):
 
     @app.post("/api/llm/test", dependencies=[Depends(authorized)])
     async def test():
+        settings, credentials = s.llm.test_inputs()
         try:
             result = await s.llm.complete(
                 [{"role": "user", "content": "请仅回复：连接成功"}], purpose="test", output_limit=32
             )
         except ProviderError as error:
-            await asyncio.to_thread(
-                s.db.set,
-                "llm_last_test",
-                json.dumps({"ok": False, "kind": error.kind, "time": time.time()}),
-            )
+            s.llm.record_test(settings, credentials, ok=False, error_kind=error.kind)
             raise
+        except asyncio.CancelledError:
+            s.llm.record_test(settings, credentials, ok=False, error_kind="cancelled")
+            raise
+        except Exception:
+            s.llm.record_test(settings, credentials, ok=False, error_kind="internal")
+            raise ProviderError("internal", "模型连接测试未完成，请检查服务日志") from None
         if result.tool_calls or not result.text.strip():
+            s.llm.record_test(settings, credentials, ok=False, error_kind="invalid_response")
             raise ProviderError("invalid_response", "模型未返回可用测试文本")
-        await asyncio.to_thread(
-            s.db.set,
-            "llm_last_test",
-            json.dumps({"ok": True, "provider": result.provider, "time": time.time()}),
-        )
+        s.llm.record_test(settings, credentials, ok=True)
         return {
             "ok": True,
             "message": "模型已实际返回文本；本次调用已计入预算",

@@ -357,6 +357,10 @@ def test_llm_api_auth_and_test_chat_use_real_fixture(tmp_path):
     assert response.status_code == 200, response.text
     assert response.json()["text"] == "fixture reply"
     assert response.json()["usage"]["input_tokens"] == 9
+    assert client.get("/api/providers/status").json()["llm"]["state"] == "available"
+    config.llm.model = "changed-fixture-model"
+    services.config.save(config)
+    assert client.get("/api/providers/status").json()["llm"]["state"] == "not_tested"
     chat = client.post("/api/chat", json={"text": "say hello"})
     assert chat.status_code == 200, chat.text
     assert chat.json()["text"] == "fixture reply"

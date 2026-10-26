@@ -3,10 +3,11 @@ import random
 
 from soulbot.providers.llm.base import ProviderError, estimate_tokens, trim_context
 from soulbot.providers.llm.openai_compatible import OpenAICompatibleProvider
+from soulbot.services.provider_diagnostics import ProviderDiagnostics
 
 
 class LLMService:
-    def __init__(self, config, secrets, registry, budget, audit):
+    def __init__(self, config, secrets, registry, budget, audit, diagnostics=None):
         self.config, self.secrets, self.registry, self.budget, self.audit = (
             config,
             secrets,
@@ -16,6 +17,30 @@ class LLMService:
         )
         self.transport = None
         self.limiter = asyncio.Semaphore(4)
+        self.diagnostics = diagnostics or ProviderDiagnostics()
+
+    def test_inputs(self):
+        settings = self.config.current.llm.model_copy(deep=True)
+        secrets = {
+            "primary": self.secrets.get("llm_api_key"),
+            "fallback_1": self.secrets.get("llm_fallback_1"),
+            "fallback_2": self.secrets.get("llm_fallback_2"),
+        }
+        return settings, secrets
+
+    def test_status(self):
+        settings, secrets = self.test_inputs()
+        return self.diagnostics.status(
+            "llm",
+            settings,
+            secrets,
+            enabled=settings.enabled
+            or any(endpoint.enabled for endpoint in settings.fallbacks.values()),
+            configured=self.configured(),
+        )
+
+    def record_test(self, settings, secrets, *, ok, error_kind=None):
+        self.diagnostics.record("llm", settings, secrets, ok=ok, error_kind=error_kind)
 
     def configured(self):
         settings = self.config.current

@@ -37,6 +37,7 @@ from soulbot.services.image_service import ImageGenerationService
 from soulbot.services.llm_service import LLMService
 from soulbot.services.media_service import MediaError, MediaStore
 from soulbot.services.meme_service import MemeService
+from soulbot.services.provider_diagnostics import ProviderDiagnostics
 from soulbot.services.render_service import HTMLRenderService
 from soulbot.services.secret_service import SecretService
 from soulbot.services.tts_service import TTSService
@@ -92,6 +93,7 @@ class Services:
     speech: TTSService | None = None
     recognition: ASRService | None = None
     images: ImageGenerationService | None = None
+    diagnostics: ProviderDiagnostics | None = None
 
 
 def build_services(root):
@@ -115,16 +117,30 @@ def build_services(root):
         hashlib.sha256(secrets_service.get("onebot_access_token").encode()).hexdigest(),
     )
     services.budget = BudgetService(db)
+    services.diagnostics = ProviderDiagnostics()
     services.llm = LLMService(
-        config, services.secrets, services.providers, services.budget, db.audit
+        config,
+        services.secrets,
+        services.providers,
+        services.budget,
+        db.audit,
+        services.diagnostics,
     )
     services.media = MediaStore(root, db)
     services.media.cleanup()
     services.audio = AudioStore(root, db)
     services.audio.cleanup()
-    services.speech = TTSService(config, services.secrets, services.providers, services.budget, db)
+    services.speech = TTSService(
+        config, services.secrets, services.providers, services.budget, db, services.diagnostics
+    )
     services.recognition = ASRService(
-        root, config, services.secrets, services.providers, services.budget, db
+        root,
+        config,
+        services.secrets,
+        services.providers,
+        services.budget,
+        db,
+        services.diagnostics,
     )
     services.images = ImageGenerationService(
         config, services.secrets, services.providers, services.budget, db
@@ -418,12 +434,21 @@ def create_web_app(root: Path, services=None):
             if s.llm.configured()
             else "尚未配置模型或 API Key",
             "llm_configured": s.llm.configured(),
-            "llm_last_test": json.loads(s.db.get("llm_last_test") or "null"),
+            "llm_provider_test": s.llm.test_status(),
             "pending_conversations": len(s.agent.pending),
             "usage": s.budget.summary(s.config.current),
             "meme_generator": s.meme.status(),
             "restart_required": restart_required(),
             "stage": "M2 · 图片、卡片与语音",
+        }
+
+    @app.get("/api/providers/status", dependencies=[Depends(authorized)])
+    def providers_status():
+        return {
+            "llm": s.llm.test_status(),
+            "tts": s.speech.test_status(),
+            "asr": s.recognition.test_status(),
+            "image_generation": s.images.diagnostics(),
         }
 
     def get_bots():

@@ -9,7 +9,7 @@ from soulbot.services.audio_service import inspect_audio
 
 
 class ASRService:
-    def __init__(self, root, config, secrets, registry, budget, db):
+    def __init__(self, root, config, secrets, registry, budget, db, diagnostics):
         self.config, self.secrets, self.registry, self.budget, self.db = (
             config,
             secrets,
@@ -17,10 +17,31 @@ class ASRService:
             budget,
             db,
         )
+        self.diagnostics = diagnostics
         self.local = LocalASRProvider(root)
         registry.register("asr", "local", self.local, default=True)
         registry.register("asr", "openai_compatible", OpenAICompatibleASRProvider(secrets))
         self.jobs, self.closed = set(), False
+
+    def test_inputs(self):
+        settings = self.config.current.asr.model_copy(deep=True)
+        secret = (
+            self.secrets.get("asr_api_key") if settings.provider == "openai_compatible" else None
+        )
+        return settings, secret
+
+    def test_status(self):
+        settings, secret = self.test_inputs()
+        return self.diagnostics.status(
+            "asr",
+            settings,
+            secret,
+            enabled=settings.enabled,
+            configured=self.configured(),
+        )
+
+    def record_test(self, settings, secret, *, ok, error_kind=None):
+        self.diagnostics.record("asr", settings, secret, ok=ok, error_kind=error_kind)
 
     def configured(self):
         settings = self.config.current.asr
@@ -88,6 +109,7 @@ class ASRService:
         task = asyncio.current_task()
         self.jobs.add(task)
         key = None
+        secret = self.secrets.get("asr_api_key") if policy.provider == "openai_compatible" else None
         try:
             audio = await asyncio.to_thread(inspect_audio, content)
             if audio.duration > policy.max_duration_seconds:
@@ -98,22 +120,27 @@ class ASRService:
                 result = await self.registry.resolve("asr", policy.provider).transcribe(
                     audio, policy
                 )
+            self.record_test(policy, secret, ok=True)
             self.finish(key, "completed")
             return result
         except asyncio.CancelledError:
             if key:
+                self.record_test(policy, secret, ok=False, error_kind="cancelled")
                 self.finish(key, "uncertain", "cancelled")
             raise
         except TimeoutError:
             if key:
+                self.record_test(policy, secret, ok=False, error_kind="timeout")
                 self.finish(key, "uncertain", "timeout")
             raise ASRError("timeout", "识别超时，云端请求可能已计费；没有自动重试", True) from None
         except ASRError as error:
             if key:
+                self.record_test(policy, secret, ok=False, error_kind=error.kind)
                 self.finish(key, "uncertain" if error.uncertain else "rejected", error.kind)
             raise
         except Exception:
             if key:
+                self.record_test(policy, secret, ok=False, error_kind="internal")
                 self.finish(key, "uncertain", "internal")
             raise ASRError("invalid", "识别失败，请检查音频格式、模型和网络", True) from None
         finally:
