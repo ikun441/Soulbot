@@ -3,6 +3,7 @@ import {imagePage, stopImageUI} from './image.js';
 import {asrPage, stopASRUI} from './asr.js';
 import {speechPage, stopSpeechUI} from './speech.js';
 import {emojiPage, memePage, renderPage, toolsPage, stopMediaUI} from './media.js';
+import {providerErrorText, providerStatusText} from './provider-guidance.js';
 const $ = (selector, node = document) => node.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const paths = {
@@ -31,7 +32,11 @@ async function api(url, options = {}) {
  const data = await response.json();
  if (!response.ok) {
   if (response.status === 401 && B?.authenticated) { B.authenticated = false; renderLogin(); }
-  throw new Error(data.detail || '操作失败，请稍后重试');
+  const error = new Error(data.detail || '操作失败，请稍后重试');
+  error.kind = data.kind;
+  error.uncertain = Boolean(data.uncertain);
+  error.status = response.status;
+  throw error;
  }
  return data;
 }
@@ -122,6 +127,8 @@ function dashboard() {
  const metric = (label, value, note, glyph) => `<article class="panel metric"><div class="metric-head">${label}<span class="metric-icon">${icon(glyph)}</span></div><div class="metric-value">${value}</div><div class="metric-note">${note}</div></article>`;
  const row = (glyph,title,detail,status,kind='') => `<div class="row"><div class="row-left"><span class="feature-icon">${icon(glyph)}</span><div><div class="row-title">${title}</div><div class="row-detail">${detail}</div></div></div>${badge(status,kind)}</div>`;
  mount(`${heading('OVERVIEW','一处空间，一份独特的陪伴。','从人格到每一次表达，慢慢塑造属于你的 SoulBot。')}<section class="panel hero"><div class="hero-copy"><div class="eyebrow">HELLO, ${esc(C.soulbot.name.toUpperCase())}</div><h2>让陪伴，有自己的模样。</h2><p>为它取个名字，写下你期待的性格。<br>从一次简单的配置，开始一段新的日常。</p><div class="actions"><a href="#setup" class="button primary">${B.initialized ? '重新查看向导' : '继续初次配置'} ${icon('arrow')}</a><a href="#personality" class="button outline">编辑人格</a></div></div>${orb()}</section><div class="section-title"><h2>此刻的运行状态</h2><span class="muted">来自本机的真实状态</span></div><div class="metric-grid">${metric('系统版本',B.version,'M2 · Emoji 与表情包生成','model')}${metric('QQ 连接',health.qq_connected ? '已连接' : '未连接',health.qq_enabled ? '已启用适配器' : '默认关闭，等待配置','qq')}${metric('今日 Token',String(health.usage?.reserved_or_used_tokens ?? 0),'包含预留与保守估算用量','usage')}${metric('安全边界','自主行为关闭','媒体工具限次执行，发送前复核权限','shield')}</div><div class="section-title"><h2>让每一步，都清晰可见</h2><a href="#version" class="tag">查看开发进度 ↗</a></div><div class="two-columns"><section class="panel"><h2>连接与服务</h2><p class="muted">先建立可靠的连接，再让故事发生。</p><div class="rows">${row('model','Web 管理服务','FastAPI · 原生浏览器界面','运行中','good')}${row('logs','本地数据库','SQLite · 配置与状态安全保存',health.sqlite ? '正常' : '异常',health.sqlite?'good':'wait')}${row('qq','NoneBot2 / OneBot V11',health.nonebot ? '驱动与适配器已初始化' : '仅管理服务模式',health.nonebot ? '已就绪' : '未加载',health.nonebot?'good':'wait')}${row('heart','AI 模型调用',health.llm,health.llm_provider_test?.state==='available'?'最近调用成功':health.llm_provider_test?.state==='failed'?'最近调用失败':health.llm_provider_test?.state==='unconfigured'?'未配置':'待实际测试',health.llm_provider_test?.state==='available'?'good':'wait')}</div><div class="actions"><button class="button quiet small" id="health-refresh">刷新健康检查</button><a href="#qq" class="button quiet small">管理 QQ 连接</a></div></section><section class="panel"><div class="mini-label">A GENTLE REMINDER</div><h2 style="margin-top:14px">温柔，也需要边界。</h2><p class="muted">人格与情绪是可配置的程序模拟。所有主动行为都应建立在真实事件和用户授权之上。</p><div class="note">默认被动回应 · 私聊与群聊隔离<br>自主社交关闭 · 空间发布需审批<br>费用上限 ${esc(C.behavior.daily_cost_cny)} 元 / 天（价格未知时费用会标记为未知）</div><div class="roadmap"><strong>正在生长的能力</strong><br>M1 QQ 与 AI → M2 多模态<br>M3 人格记忆 → M4 自主行为<br>M5 空间草稿 → M6 稳定发布</div></section></div>`);
+ const llmRow=[...$('#main').querySelectorAll('.row')].find(item=>item.querySelector('.row-title')?.textContent==='AI 模型调用');
+ const llmDetail=document.createElement('div');llmDetail.className='row-detail';llmDetail.textContent=providerStatusText(health.llm_provider_test,'LLM');llmRow?.querySelector('.row-left > div')?.append(llmDetail);
  $('#health-refresh').onclick = e => guarded(async () => {health = await api('/api/health');dashboard();notice('健康状态已刷新');},e.currentTarget);
 }
 function qqForm() {
@@ -220,7 +227,7 @@ guarded(async()=>{await refresh();if(!B.has_admin){C={appearance:{motion:true}};
 function chatPanel(){return `<section class="panel chat-panel"><div class="section-title" style="margin-top:0"><h2>和它聊一会儿</h2><button class="button quiet small" id="clear-chat" type="button">清空试聊</button></div><p class="muted">使用保存的人格与模型。试聊不会发送到 QQ，也不会混入 QQ 会话。</p><div id="chat-messages" class="chat-messages" aria-label="试聊记录"><p class="empty-state">说一句你好，看看它会如何回应。</p></div><form id="chat-form"><label for="chat-text" class="mini-label">输入消息</label><div class="chat-input"><textarea id="chat-text" required maxlength="4000" rows="2" placeholder="你好，可以介绍一下自己吗？"></textarea><button class="button primary" id="chat-send" type="submit">保存并发送 ${icon('arrow')}</button><button class="button quiet" id="chat-stop" type="button" hidden>停止</button></div></form><p class="row-detail" id="chat-status">当前试聊仅使用本页短期记录。每次调用都遵守 Token 与费用预算。</p></section>`;}
 function bindModel(){
  const list=$('#model-list');if(list)list.onclick=e=>guarded(async()=>{if(!await saveEditor())return;const result=await send('/api/llm/models','POST');$('#model-ids').innerHTML=result.models.map(name=>`<option value="${esc(name)}"></option>`).join('');$('#model-result').hidden=false;$('#model-result').textContent=`已读取 ${result.models.length} 个服务商实际返回的模型。${result.selected_model_available?'当前模型在列表中。':'请在模型名称字段选择或填写有权限的模型。'}`;},e.currentTarget);
- const test=$('#model-test');if(test)test.onclick=e=>guarded(async()=>{if(!await saveEditor())return;const result=await send('/api/llm/test','POST');$('#model-result').hidden=false;$('#model-result').textContent=`${result.message}。回复：${result.text}。费用：${result.cost_cny===null?'未知':result.cost_cny.toFixed(6)+' 元'}${result.estimated?'（用量为保守估算）':''}`;health=await api('/api/health');},e.currentTarget);
+ const test=$('#model-test');if(test)test.onclick=e=>guarded(async()=>{if(!await saveEditor())return;try{const result=await send('/api/llm/test','POST');$('#model-result').hidden=false;$('#model-result').textContent=`${result.message}。回复：${result.text}。费用：${result.cost_cny===null?'未知':result.cost_cny.toFixed(6)+' 元'}${result.estimated?'（用量为保守估算）':''}`;health=await api('/api/health');}catch(error){const node=$('#model-result');node.hidden=false;node.textContent=providerErrorText(error.kind,error.message);throw error;}},e.currentTarget);
  const form=$('#chat-form');if(!form)return;
  $('#clear-chat').onclick=()=>{chatController?.abort();webHistory=[];$('#chat-messages').innerHTML='<p class="empty-state">试聊记录已清空。</p>';};
  $('#chat-stop').onclick=()=>chatController?.abort();

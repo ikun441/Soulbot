@@ -90,16 +90,32 @@ def test_asr_api_auth_actual_content_and_no_persisted_transcript(services, tmp_p
         client.post(
             "/api/auth/setup", json={"username": "asr_fixture", "password": "asr-test-password-123"}
         )
+        services.config.current.asr.enabled = False
+        disabled = client.post("/api/asr/transcribe", files={"file": ("x.wav", wav())})
+        assert disabled.status_code == 422
+        assert disabled.json()["kind"] == "disabled" and not disabled.json()["uncertain"]
+        services.config.current.asr.enabled = True
         result = client.post(
             "/api/asr/transcribe", files={"file": ("misleading.mp3", wav(), "audio/mpeg")}
         )
         assert result.status_code == 200 and result.json()["text"] == "私有测试文字"
         assert result.json()["duration"] == 0.1
         assert client.get("/api/providers/status").json()["asr"]["state"] == "available"
+
+        async def uncertain_failure(audio, settings):
+            raise ASRError("timeout", "安全的识别超时提示", uncertain=True)
+
+        monkeypatch.setattr(services.recognition.local, "transcribe", uncertain_failure)
+        failure = client.post("/api/asr/transcribe", files={"file": ("uncertain.wav", wav())})
+        assert failure.status_code == 422
+        assert failure.json()["kind"] == "timeout" and failure.json()["uncertain"]
         assert (
             client.post("/api/asr/transcribe", files={"file": ("x.wav", b"bad")}).status_code == 422
         )
-        assert client.get("/api/asr/status").json()["usage"]["calls"] == 1
+        usage = client.get("/api/asr/status").json()["usage"]
+        assert usage["calls"] == 2
+        assert usage["recent"][0]["status"] == "uncertain"
+        assert usage["recent"][0]["error_kind"] == "timeout"
         assert "私有测试文字" not in client.get("/api/audit").text
         assert "私有测试文字" not in client.get("/api/usage").text
         assert "api_key" not in client.get("/api/asr/status").text

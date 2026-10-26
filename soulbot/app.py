@@ -238,11 +238,18 @@ def create_web_app(root: Path, services=None):
             if exc.kind in {"budget", "task_budget", "unknown_cost", "rate_limit"}
             else 502
         )
-        return JSONResponse({"detail": str(exc), "kind": exc.kind}, status_code=code)
+        return JSONResponse(
+            {"detail": str(exc), "kind": exc.kind, "uncertain": exc.uncertain}, status_code=code
+        )
 
     @app.exception_handler(MediaError)
     async def media_error(request, exc):
-        return JSONResponse({"detail": str(exc)}, status_code=422)
+        result = {"detail": str(exc)}
+        if kind := getattr(exc, "kind", None):
+            result["kind"] = kind
+        if hasattr(exc, "uncertain"):
+            result["uncertain"] = bool(exc.uncertain)
+        return JSONResponse(result, status_code=422)
 
     @app.exception_handler(EnvironmentError)
     async def environment_error(request, exc):

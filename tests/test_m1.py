@@ -364,8 +364,18 @@ def test_llm_api_auth_and_test_chat_use_real_fixture(tmp_path):
     chat = client.post("/api/chat", json={"text": "say hello"})
     assert chat.status_code == 200, chat.text
     assert chat.json()["text"] == "fixture reply"
+    services.llm.transport = httpx.MockTransport(
+        lambda request: httpx.Response(503, text="private provider response")
+    )
+    failure = client.post("/api/llm/test")
+    assert failure.status_code == 502
+    assert failure.json()["kind"] == "unavailable" and failure.json()["uncertain"]
+    assert "private provider response" not in failure.text
     assert "local-fixture-secret" not in client.get("/api/config").text
-    assert client.get("/api/usage").json()["reserved_or_used_tokens"] == 22
+    usage = client.get("/api/usage").json()
+    assert usage["reserved_or_used_tokens"] >= 22
+    assert usage["recent"][0]["status"] == "uncertain"
+    assert usage["recent"][0]["error_kind"] == "unavailable"
 
 
 def test_send_test_only_accepts_explicit_confirmation(tmp_path):

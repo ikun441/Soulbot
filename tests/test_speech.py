@@ -225,6 +225,11 @@ def test_speech_api_auth_preview_no_key_echo_and_no_connected_qq(services, tmp_p
             "/api/auth/setup",
             json={"username": "speech_admin", "password": "speech-test-password-123"},
         )
+        services.config.current.tts.enabled = False
+        disabled = client.post("/api/tts/synthesize", json={"text": "测试文字"})
+        assert disabled.status_code == 422
+        assert disabled.json()["kind"] == "disabled" and not disabled.json()["uncertain"]
+        services.config.current.tts.enabled = True
         result = client.post("/api/tts/synthesize", json={"text": "测试文字"})
         assert result.status_code == 200
         assert client.get("/api/providers/status").json()["tts"]["state"] == "available"
@@ -238,6 +243,16 @@ def test_speech_api_auth_preview_no_key_echo_and_no_connected_qq(services, tmp_p
             ).status_code
             == 503
         )
+
+        async def uncertain_failure(text, settings):
+            raise SpeechError("timeout", "安全的超时提示", uncertain=True)
+
+        monkeypatch.setattr(
+            services.providers.resolve("tts", "edge"), "synthesize", uncertain_failure
+        )
+        failure = client.post("/api/tts/synthesize", json={"text": "再次测试"})
+        assert failure.status_code == 422
+        assert failure.json()["kind"] == "timeout" and failure.json()["uncertain"]
         assert "api_key" not in client.get("/api/tts/status").text
 
 
