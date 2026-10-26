@@ -27,6 +27,7 @@ from soulbot.core.budget import BudgetService
 from soulbot.core.permissions import PermissionEngine
 from soulbot.providers.llm.base import ProviderError
 from soulbot.providers.registry import ProviderRegistry
+from soulbot.services.asr_service import ASRService
 from soulbot.services.audio_service import AudioStore
 from soulbot.services.auth_service import AccountChange, AuthService
 from soulbot.services.auth_service import AdminAccount as Account
@@ -57,6 +58,7 @@ class SecretUpdate(Model):
     llm_fallback_1: SecretStr | None = None
     llm_fallback_2: SecretStr | None = None
     tts_api_key: SecretStr | None = None
+    asr_api_key: SecretStr | None = None
 
 
 class Progress(Model):
@@ -86,6 +88,7 @@ class Services:
     renderer: HTMLRenderService | None = None
     audio: AudioStore | None = None
     speech: TTSService | None = None
+    recognition: ASRService | None = None
 
 
 def build_services(root):
@@ -117,6 +120,9 @@ def build_services(root):
     services.audio = AudioStore(root, db)
     services.audio.cleanup()
     services.speech = TTSService(config, services.secrets, services.providers, services.budget, db)
+    services.recognition = ASRService(
+        root, config, services.secrets, services.providers, services.budget, db
+    )
     services.emoji = EmojiLibrary(root, config, db)
     if config.current.emoji.enabled:
         services.emoji.refresh()
@@ -131,6 +137,9 @@ def build_services(root):
         )
         connection.execute(
             "UPDATE tts_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
+        )
+        connection.execute(
+            "UPDATE asr_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
         )
     return services
 
@@ -150,6 +159,7 @@ def create_web_app(root: Path, services=None):
             await s.meme.close()
             await s.agent.close()
             await s.speech.close()
+            await s.recognition.close()
             await s.providers.close()
 
     app = FastAPI(
@@ -459,6 +469,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.speech import install_speech_api
 
     install_speech_api(app, s, authorized)
+    from soulbot.web.api.asr import install_asr_api
+
+    install_asr_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

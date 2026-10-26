@@ -1,4 +1,4 @@
-# 架构 · v0.3.0
+# 架构 · v0.8.0
 
 入口 main.py → 构建配置/SQLite/密钥/Registry 服务 → NoneBot2 FastAPI + HTTPX + WebSocket 驱动 → OneBot V11 适配器 → 挂载管理 WebUI。ASGI 外层网关在 QQ 关闭时拒绝 OneBot 请求。
 
@@ -23,3 +23,6 @@
 运行根目录默认项目根，可用 SOULBOT_HOME 隔离。配置与数据库建立即幂等，不覆盖原文件。端口/QQ/Token 应用依赖重启；人格、预算、壁纸等管理配置保存后立即读取。每日额度记录持久化，外部操作在执行时重验权限。
 
 OpenAI 兼容 LLM Provider 在请求时注册，模型 ID、工具能力和费用由服务管理员填写。网页试聊只请求文本；QQ 在能力和媒体权限允许时暴露已注册工具。任务总预算跨轮次共享，工具 Schema 计入输入。ToolContext 的会话范围由服务端注入，不接受 LLM 伪造；图片发送前重新检查权限。NoneBot 全局初始化只在真实入口执行，测试管理 API 使用独立应用。
+
+## 语音识别路径
+ASRService 与 TTSService 分开，能力 Registry 以 asr/tts 分类。ASR 先验证音频并预留秒数和费用，本地模型通过自有子进程加载，云端接口使用独立密钥。QQ record 经单独预过滤、去重和持久冷却，再调用 NapCat WAV/Base64；授权重验后转写作为普通用户内容进入 Agent，不能直接执行管理命令。上传测试不保存录音/转写历史，用量表仅有秒数和费用。

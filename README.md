@@ -1,6 +1,6 @@
 # SoulBot
 
-**当前版本 v0.7.0 · TTS 语音工坊**
+**当前版本 v0.8.0 · ASR 语音识别**
 
 具备可配置人格、模拟情绪、长期记忆与明确行为边界的 AI QQ 机器人平台。当前交付基础服务、QQ 文本消息处理、OpenAI 兼容 LLM 与原生 WebUI。人格和情绪均为软件模拟，不代表真实意识或主观情感。
 
@@ -41,7 +41,7 @@ Windows 双击 `start.cmd`。打开 <http://127.0.0.1:2526>，按向导创建管
 
 ## 开发边界
 
-NapCat、模型服务和密钥需用户自行配置。三个额外仓库均已实际下载并加载，共验证 857 个模板及真实生成；HTML 卡片也已用真实 Chromium 完成中文出图和接口/工具验证。NapCat/QQ 与真实外部 LLM 联调仍需有效账户。TTS 已接入真实 Edge 服务与独立的兼容语音接口，支持试听、持久限额和会话隔离；ASR/云端生图是后续 M2 增量；持续人格/记忆在 M3，自主行为/日记在 M4，QQ 空间在 M5。详见 [多模态说明](docs/multimodal.md)、[卡片说明](docs/html-render.md)、[语音说明](docs/tts.md) 和 [进度与下一版计划](docs/progress.md)。
+NapCat、模型服务和密钥需用户自行配置。三个额外仓库均已实际下载并加载，共验证 857 个模板及真实生成；HTML 卡片也已用真实 Chromium 完成中文出图和接口/工具验证。NapCat/QQ 与真实外部 LLM 联调仍需有效账户。TTS 已接入真实 Edge 服务与独立的兼容语音接口，支持试听、持久限额和会话隔离；ASR 已支持真实本地 Whisper 和独立云端兼容接口，提供上传转写与受限 QQ 语音处理；云端生图是后续 M2 增量；持续人格/记忆在 M3，自主行为/日记在 M4，QQ 空间在 M5。详见 [多模态说明](docs/multimodal.md)、[卡片说明](docs/html-render.md)、[语音说明](docs/tts.md)、[识别说明](docs/asr.md) 和 [进度与下一版计划](docs/progress.md)。
 
 ```bash
 .venv/bin/python -m pip install -r requirements-dev.txt

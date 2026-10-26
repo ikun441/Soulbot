@@ -357,6 +357,26 @@ class SpeechSettings(Model):
     max_chars_per_day: int = Field(default=10000, ge=100, le=1000000)
 
 
+class ASRSettings(Model):
+    enabled: bool = False
+    qq_enabled: bool = False
+    provider: Literal["local", "openai_compatible"] = "local"
+    base_url: str = "https://api.openai.com/v1"
+    model: str = Field(default="", max_length=120)
+    language: str = Field(default="zh", pattern=r"^([a-z]{2})?$")
+    timeout_seconds: float = Field(default=90, ge=5, le=180, allow_inf_nan=False)
+    max_duration_seconds: float = Field(default=60, ge=1, le=180, allow_inf_nan=False)
+    max_calls_per_minute: int = Field(default=3, ge=1, le=20)
+    max_calls_per_day: int = Field(default=50, ge=1, le=1000)
+    max_seconds_per_day: int = Field(default=1800, ge=60, le=86400)
+    price_cny_per_minute: float | None = Field(default=None, ge=0, le=1000, allow_inf_nan=False)
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_url(cls, value):
+        return LLMEndpoint.valid_url(value)
+
+
 class Settings(Model):
     soulbot: Identity = Field(default_factory=Identity)
     web: Web = Field(default_factory=Web)
@@ -371,6 +391,7 @@ class Settings(Model):
     tools: MediaToolPolicies = Field(default_factory=MediaToolPolicies)
     html_render: HTMLRenderSettings = Field(default_factory=HTMLRenderSettings)
     tts: SpeechSettings = Field(default_factory=SpeechSettings)
+    asr: ASRSettings = Field(default_factory=ASRSettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):
@@ -378,6 +399,10 @@ class Settings(Model):
 
         if self.meme.managed and urlsplit(self.meme.base_url).port == self.web.port:
             raise ValueError("meme-generator 与 SoulBot 需要使用不同端口")
+        if self.asr.qq_enabled and self.qq.connection != "reverse":
+            raise ValueError(
+                "QQ 语音识别当前需要反向 WebSocket；正向驱动的单帧限制可能中断大音频响应"
+            )
         return self
 
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import re
 import secrets
 from urllib.parse import urlsplit
 
@@ -16,8 +17,8 @@ from nonebot.adapters.onebot.v11 import (
 
 from soulbot.app import create_web_app
 from soulbot.core.events import ChatEvent
-from soulbot.services.audio_service import AudioPayload
-from soulbot.services.media_service import ImagePayload
+from soulbot.services.audio_service import MAX_AUDIO_BYTES, AudioPayload
+from soulbot.services.media_service import ImagePayload, MediaError
 
 
 def normalize(event: MessageEvent, known_bot_ids=()):
@@ -28,6 +29,7 @@ def normalize(event: MessageEvent, known_bot_ids=()):
         if segment.type == "at"
     ]
     reply = "none"
+    recordings = [segment for segment in event.original_message if segment.type == "record"]
     if event.reply and event.reply.sender.user_id is not None:
         reply = "bot" if str(event.reply.sender.user_id) == bot_id else "other"
     return ChatEvent(
@@ -41,10 +43,31 @@ def normalize(event: MessageEvent, known_bot_ids=()):
         mentions_other=any(value not in {bot_id, "all", ""} for value in mentions),
         is_bot=user_id in known_bot_ids or bool(getattr(event.sender, "is_bot", False)),
         role=event.sender.role or "member",
+        record_file=str(recordings[0].data.get("file", "")) if len(recordings) == 1 else None,
     )
 
 
 class NoneBotTransport:
+    async def fetch_record(self, event):
+        # Current NapCat emits an opaque UUID. Never send arbitrary URLs/paths to it.
+        if not event.record_file or not re.fullmatch(
+            r"[a-zA-Z0-9_-]{1,180}(?:\.(?:amr|silk|mp3|wav))?", event.record_file
+        ):
+            raise MediaError("录音标识不是受支持的 NapCat 文件 ID，已拒绝读取路径或网址")
+        try:
+            async with asyncio.timeout(20):
+                result = await nonebot.get_bot(event.bot_id).call_api(
+                    "get_record", file_id=event.record_file, out_format="wav"
+                )
+            content = result.get("base64") if isinstance(result, dict) else None
+            if not isinstance(content, str) or len(content) > ((MAX_AUDIO_BYTES + 2) // 3) * 4:
+                raise ValueError
+            return base64.b64decode(content, validate=True)
+        except Exception:
+            raise MediaError(
+                "NapCat 未返回受支持的录音 Base64；请检查 get_record、FFmpeg 与文件是否仍有效"
+            ) from None
+
     @staticmethod
     def connected():
         return sorted(nonebot.get_bots())
@@ -142,7 +165,11 @@ def create_runtime(services):
     @matcher.handle()
     async def receive_message(bot: Bot, event: MessageEvent):
         try:
-            await services.agent.accept(normalize(event, transport.connected()))
+            normalized = normalize(event, transport.connected())
+            if normalized.record_file is not None:
+                await services.agent.accept_record(normalized)
+            else:
+                await services.agent.accept(normalized)
         except Exception:
             # Do not let framework exception logging include private event text.
             await asyncio.to_thread(services.db.audit, "event_failed", "internal")
@@ -154,6 +181,7 @@ def create_runtime(services):
         await services.meme.close()
         await services.agent.close()
         await services.speech.close()
+        await services.recognition.close()
         await services.providers.close()
 
     driver.on_shutdown(shutdown)

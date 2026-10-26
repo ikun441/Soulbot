@@ -13,6 +13,7 @@ class ChatEvent:
     mentions_other: bool = False
     is_bot: bool = False
     role: str = "member"
+    record_file: str | None = None
 
     @property
     def scope(self):

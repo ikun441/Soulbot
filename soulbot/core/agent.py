@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import json
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass, field, replace
 
 from soulbot.core.conversation import ConversationStore
 from soulbot.core.decision import DecisionEngine
@@ -108,6 +110,7 @@ class SoulBotAgent:
         self.decision = DecisionEngine(db, self.conversation)
         self.executor = ActionExecutor(config, self.decision, db.audit)
         self.pending = {}
+        self.record_jobs = set()
         self.closed = False
 
     async def accept(self, event):
@@ -120,6 +123,9 @@ class SoulBotAgent:
         trigger = await asyncio.to_thread(self.decision.classify, self.config.current, event)
         if not trigger:
             return
+        await self.enqueue(event, trigger)
+
+    async def enqueue(self, event, trigger):
         if event.scope not in self.pending:
             if len(self.pending) >= 256:
                 await asyncio.to_thread(self.db.audit, "message_queue_full")
@@ -132,6 +138,81 @@ class SoulBotAgent:
             )
         elif len(self.pending[event.scope].items) < 20:
             self.pending[event.scope].items.append((event, trigger))
+
+    def record_eligible(self, event):
+        settings = self.config.current
+        if (
+            not settings.asr.enabled
+            or not settings.asr.qq_enabled
+            or settings.qq.connection != "reverse"
+            or not self.decision.access(settings, event)
+        ):
+            return False
+        state = self.decision.state(event)
+        if self.decision.clock() - state["last_call"] < settings.behavior.reply_cooldown_seconds:
+            return False
+        if not event.group_id:
+            return True
+        return (
+            (event.directed or event.reply_target == "bot")
+            and not event.mentions_other
+            and state["muted_until"] <= self.decision.clock()
+            and self.decision.mode(settings, event) != "silent"
+        )
+
+    def claim_record(self, event):
+        settings = self.config.current
+        now = time.time()
+        key = "asr_input_" + hashlib.sha256(event.group_scope.encode()).hexdigest()
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
+            if row and now - float(row[0]) < max(3, settings.behavior.reply_cooldown_seconds):
+                return False
+            db.execute("INSERT OR REPLACE INTO metadata VALUES (?,?)", (key, str(now)))
+        return True
+
+    async def accept_record(self, event):
+        if (
+            self.closed
+            or not self.services
+            or not self.services.qq_transport
+            or len(self.record_jobs) >= 2
+        ):
+            return
+        if not await asyncio.to_thread(self.record_eligible, event):
+            return
+        if not self.services.recognition.configured():
+            return
+        if not await asyncio.to_thread(
+            self.conversation.unseen, event
+        ) or not await asyncio.to_thread(self.claim_record, event):
+            return
+        task = asyncio.current_task()
+        if len(self.record_jobs) >= 2:
+            return
+        self.record_jobs.add(task)
+        try:
+            content = await self.services.qq_transport.fetch_record(event)
+            if not await asyncio.to_thread(self.record_eligible, event):
+                return
+            result = await self.services.recognition.transcribe(content, "qq_direct")
+            if not result.text or not await asyncio.to_thread(self.record_eligible, event):
+                return
+            # A transcript is user content. It cannot invoke administrator commands.
+            text = (
+                ((event.text.strip() + "\n") if event.text.strip() else "")
+                + "[语音转写，可能有误] "
+                + result.text
+            )
+            converted = replace(event, text=text[:12000], record_file=None)
+            await self.enqueue(converted, "direct")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await asyncio.to_thread(self.db.audit, "asr_qq_failed", "record")
+        finally:
+            self.record_jobs.discard(task)
 
     async def worker(self, scope):
         try:
@@ -345,7 +426,7 @@ class SoulBotAgent:
 
     async def close(self):
         self.closed = True
-        tasks = [p.task for p in list(self.pending.values()) if p.task]
+        tasks = [p.task for p in list(self.pending.values()) if p.task] + list(self.record_jobs)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
