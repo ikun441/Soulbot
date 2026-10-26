@@ -18,6 +18,10 @@ class SynthesizeSpeech(Model):
     text: str = Field(min_length=1, max_length=2000)
 
 
+class GenerateImage(Model):
+    prompt: str = Field(min_length=1, max_length=4000)
+
+
 class BrowseEmoji(Model):
     offset: int = Field(default=0, ge=0, le=1000000)
     limit: int = Field(default=100, ge=1, le=200)
@@ -160,7 +164,23 @@ def register_media_tools(s):
             "message": "AI 合成语音已生成，需发送执行器确认才算发出",
         }
 
+    async def image(args, context):
+        generated = await s.images.generate(args.prompt, context.purpose)
+        item = await asyncio.to_thread(
+            s.media.save, generated.data, "image_generation", context.scope or "admin"
+        )
+        return {
+            "attachment": "media:" + item["id"],
+            "message": "AI 图片已生成；发送执行器确认后才算发出",
+        }
+
     for name, description, schema, handler in [
+        (
+            "generate_image",
+            "按简短描述生成一张 AI 图片；只填写提示词，不传文件或 URL。",
+            GenerateImage,
+            image,
+        ),
         (
             "synthesize_speech",
             "将短文本合成为 AI 语音；只拟发送一次，不能冒充真人录音。",
@@ -201,17 +221,20 @@ def register_media_tools(s):
                 description,
                 schema,
                 handler,
-                timeout=150
+                timeout=210
+                if name == "generate_image"
+                else 150
                 if name == "synthesize_speech"
                 else 120
                 if name in {"generate_meme", "render_html"}
                 else 30,
                 max_calls=1
-                if name == "synthesize_speech"
+                if name in {"synthesize_speech", "generate_image"}
                 else 2
                 if name in {"generate_meme", "render_html"}
                 else 5,
-                with_context=name in {"generate_meme", "render_html", "synthesize_speech"},
+                with_context=name
+                in {"generate_meme", "render_html", "synthesize_speech", "generate_image"},
             )
         )
 
@@ -244,7 +267,9 @@ def specifications(s):
         for tool in s.tools.tools.values()
         if getattr(config.tools, tool.name, "deny") == "auto"
         and (
-            config.tts.enabled and s.speech.configured()
+            config.image_generation.enabled and s.images.configured()
+            if tool.name == "generate_image"
+            else config.tts.enabled and s.speech.configured()
             if tool.name == "synthesize_speech"
             else config.html_render.enabled and s.renderer.ready()
             if tool.name == "render_html"

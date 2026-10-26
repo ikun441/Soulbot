@@ -33,6 +33,7 @@ from soulbot.services.auth_service import AccountChange, AuthService
 from soulbot.services.auth_service import AdminAccount as Account
 from soulbot.services.config_service import ConfigService, Model, Settings
 from soulbot.services.environment_service import EnvironmentError, EnvironmentService
+from soulbot.services.image_service import ImageGenerationService
 from soulbot.services.llm_service import LLMService
 from soulbot.services.media_service import MediaError, MediaStore
 from soulbot.services.meme_service import MemeService
@@ -59,6 +60,7 @@ class SecretUpdate(Model):
     llm_fallback_2: SecretStr | None = None
     tts_api_key: SecretStr | None = None
     asr_api_key: SecretStr | None = None
+    image_api_key: SecretStr | None = None
 
 
 class Progress(Model):
@@ -89,6 +91,7 @@ class Services:
     audio: AudioStore | None = None
     speech: TTSService | None = None
     recognition: ASRService | None = None
+    images: ImageGenerationService | None = None
 
 
 def build_services(root):
@@ -123,6 +126,9 @@ def build_services(root):
     services.recognition = ASRService(
         root, config, services.secrets, services.providers, services.budget, db
     )
+    services.images = ImageGenerationService(
+        config, services.secrets, services.providers, services.budget, db
+    )
     services.emoji = EmojiLibrary(root, config, db)
     if config.current.emoji.enabled:
         services.emoji.refresh()
@@ -140,6 +146,9 @@ def build_services(root):
         )
         connection.execute(
             "UPDATE asr_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
+        )
+        connection.execute(
+            "UPDATE image_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
         )
     return services
 
@@ -160,6 +169,7 @@ def create_web_app(root: Path, services=None):
             await s.agent.close()
             await s.speech.close()
             await s.recognition.close()
+            await s.images.close()
             await s.providers.close()
 
     app = FastAPI(
@@ -472,6 +482,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.asr import install_asr_api
 
     install_asr_api(app, s, authorized)
+    from soulbot.web.api.image import install_image_api
+
+    install_image_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

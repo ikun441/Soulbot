@@ -17,14 +17,32 @@ class ActionExecutor:
         self.sender = None
         self.lock = asyncio.Lock()
         self.permissions = PermissionEngine(
-            {"send_text": "auto", "send_image": "auto", "send_voice": "auto"}
+            {
+                "send_text": "auto",
+                "send_image": "auto",
+                "send_voice": "auto",
+                "send_generated_image": "auto",
+            }
         )
 
     async def send(self, event, text, trigger):
         return await self.deliver(event, text[:2000], trigger, "send_text")
 
-    async def send_image(self, event, image, trigger):
-        return await self.deliver(event, image, trigger, "send_image")
+    async def send_image(self, event, image, trigger, tool=None):
+        return await self.deliver(
+            event,
+            image,
+            trigger,
+            "send_generated_image" if tool == "generate_image" else "send_image",
+        )
+
+    def media_enabled(self, permission):
+        settings = self.config.current
+        if permission == "send_generated_image":
+            return settings.image_generation.enabled and settings.tools.generate_image == "auto"
+        if permission == "send_voice":
+            return settings.tts.enabled and settings.tools.synthesize_speech == "auto"
+        return True
 
     async def send_audio(self, event, audio, trigger):
         self.permissions.require("send_voice")
@@ -44,10 +62,7 @@ class ActionExecutor:
         async with self.lock:
             if not await self.allowed(event, trigger):
                 return False
-            if permission == "send_voice" and (
-                not self.config.current.tts.enabled
-                or self.config.current.tools.synthesize_speech != "auto"
-            ):
+            if not self.media_enabled(permission):
                 return False
             settings = self.config.current
             delay = await asyncio.to_thread(self.decision.reserve_send, settings)
@@ -58,10 +73,7 @@ class ActionExecutor:
                 await asyncio.to_thread(self.decision.reserve_send, self.config.current)
             if not await self.allowed(event, trigger):
                 return False
-            if permission == "send_voice" and (
-                not self.config.current.tts.enabled
-                or self.config.current.tools.synthesize_speech != "auto"
-            ):
+            if not self.media_enabled(permission):
                 return False
             try:
                 async with asyncio.timeout(10):
@@ -310,7 +322,7 @@ class SoulBotAgent:
                             read_image, self.services, reference, event.scope
                         )
                         delivered = (
-                            await self.executor.send_image(event, image, trigger) or delivered
+                            await self.executor.send_image(event, image, trigger, tool) or delivered
                         )
                 except (PermissionError, ValueError):
                     await asyncio.to_thread(self.db.audit, "image_send_blocked", tool)

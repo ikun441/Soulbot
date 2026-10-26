@@ -1,5 +1,13 @@
 # SoulBot 实施计划
 
+## v0.9.0 · M2 云端图片生成
+1. 独立 image_generation Provider，兼容 /images/generations；模型/尺寸/质量/输出参数由管理员按服务能力声明，不复用聊天或语音密钥。
+2. 单次一张，限定提示词与响应大小，实际 Base64 图片校验后进入私有媒体存储；不读取模型或服务返回的任意 URL。
+3. schema v7 增加 image_usage，持久频率/每日图片上限，按张报价与未知费用，共享 LLM/TTS/ASR 费用预算。
+4. 原生 WebUI 设置、生成测试/取消、私有预览/下载和主人确认发送；generate_image 工具最多一次，发送前重验开关和权限。
+5. 验证鉴权/超时/取消/格式/URL 拒绝/隔离/预算/迁移；真实云端验收依赖独立有效凭据，没有凭据不伪造完成。
+6. 更新版本、文档、回归与敏感扫描；备份数据库后验证启动，提交并核对 GitHub main/tag。
+
 ## v0.8.0 · M2 ASR 语音转写
 1. 独立 ASR Provider：兼容 multipart /audio/transcriptions；可选本机 CPU Whisper，通过实际模型转写验收，不依赖用户云端密钥。
 2. 默认关闭；WebUI 配置/准备本地模型/上传实测/取消；明确本地处理与云端外发差异。

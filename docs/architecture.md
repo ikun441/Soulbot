@@ -1,4 +1,4 @@
-# 架构 · v0.8.0
+# 架构 · v0.9.0
 
 入口 main.py → 构建配置/SQLite/密钥/Registry 服务 → NoneBot2 FastAPI + HTTPX + WebSocket 驱动 → OneBot V11 适配器 → 挂载管理 WebUI。ASGI 外层网关在 QQ 关闭时拒绝 OneBot 请求。
 
@@ -26,3 +26,6 @@ OpenAI 兼容 LLM Provider 在请求时注册，模型 ID、工具能力和费�
 
 ## 语音识别路径
 ASRService 与 TTSService 分开，能力 Registry 以 asr/tts 分类。ASR 先验证音频并预留秒数和费用，本地模型通过自有子进程加载，云端接口使用独立密钥。QQ record 经单独预过滤、去重和持久冷却，再调用 NapCat WAV/Base64；授权重验后转写作为普通用户内容进入 Agent，不能直接执行管理命令。上传测试不保存录音/转写历史，用量表仅有秒数和费用。
+
+## 云端图片生成
+ImageGenerationService 按每次一张预留持久额度与共享费用。独立 image_generation Provider 只返回经验证的 Base64 图片，HTML Render 不参与故障替代；服务返回 URL 不下载。generate_image 的服务端上下文决定产物范围，发送执行器和管理端通用图片发送都会按来源再次检查开关/权限。

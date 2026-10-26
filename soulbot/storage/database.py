@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 6:
+            if version > 7:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -134,5 +134,17 @@ class Database:
                         error_kind TEXT);
                     CREATE INDEX IF NOT EXISTS asr_usage_day ON asr_usage(day,created_at);
                     UPDATE metadata SET value='6' WHERE key='schema_version';
+                    COMMIT;
+                """)
+            if version < 7:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS image_usage (
+                        id TEXT PRIMARY KEY, day TEXT NOT NULL, provider TEXT NOT NULL,
+                        model TEXT NOT NULL, purpose TEXT NOT NULL, status TEXT NOT NULL,
+                        images INTEGER NOT NULL, cost_cny REAL, created_at REAL NOT NULL,
+                        error_kind TEXT);
+                    CREATE INDEX IF NOT EXISTS image_usage_day ON image_usage(day,created_at);
+                    UPDATE metadata SET value='7' WHERE key='schema_version';
                     COMMIT;
                 """)

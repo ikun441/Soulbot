@@ -1,6 +1,6 @@
 # SoulBot 小白启动指南
 
-当前版本：v0.8.0。配置 NapCat 和 LLM 后可使用 QQ 文本和媒体工具；Emoji、真实 meme-generator、三个模板扩展仓库与 HTML 卡片已接入。支持通过 `.env` 保存和应用登录账号与反向 WS 地址；语音工坊支持 Edge 与独立兼容接口，详见 docs/tts.md；语音识别支持本地 Whisper 和独立云端接口，详见 docs/asr.md；云生图和长期记忆继续开发。
+当前版本：v0.9.0。配置 NapCat 和 LLM 后可使用 QQ 文本和媒体工具；Emoji、真实 meme-generator、三个模板扩展仓库与 HTML 卡片已接入。支持通过 `.env` 保存和应用登录账号与反向 WS 地址；语音工坊支持 Edge 与独立兼容接口，详见 docs/tts.md；语音识别支持本地 Whisper 和独立云端接口，详见 docs/asr.md；云端生图配置和测试入口见 docs/image-generation.md，真实服务待凭据验证；长期记忆继续开发。
 
 ## 1. 准备什么
 

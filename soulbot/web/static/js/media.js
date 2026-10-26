@@ -2,7 +2,7 @@ let statusTimer;
 const $ = selector => document.querySelector(selector);
 export function stopMediaUI() { clearInterval(statusTimer); statusTimer = undefined; }
 
-function resultCard(ctx, node, item, reference) {
+export function resultCard(ctx, node, item, reference) {
  const {esc, confirmAction, send, guarded, notice} = ctx;
  node.innerHTML = `<img class="generated-image" src="${esc(item.url)}" alt="生成的图片"><p class="row-detail">${esc(item.mime || '本地表情')} ${item.width ? `· ${item.width} × ${item.height}` : ''} ${item.size ? `· ${Math.ceil(item.size/1024)} KB` : ''}</p><div class="actions"><a class="button outline small" href="${esc(item.url)}" download>下载图片</a><button class="button quiet small" data-send-image>发送给主人 QQ</button></div>`;
  node.querySelector('[data-send-image]').onclick = () => confirmAction('发送图片给主人？','这会向人格配置中的主人 QQ 发送一张真实图片，每分钟最多一次。', async () => {const result = await send('/api/media/send-test','POST',{confirm:true,image:reference});notice(result.message);});
@@ -83,6 +83,6 @@ export async function renderPage(ctx){
 
 export function toolsPage(ctx){
  const {mount,heading,select}=ctx;
- const labels={search_emoji:'检索表情',browse_emoji:'分页浏览表情',select_emoji:'选择本轮表情图片',list_meme_templates:'查询模板列表',get_meme_info:'查询模板元数据',generate_meme:'生成表情包图片',render_html:'生成预定义卡片图片',synthesize_speech:'合成 AI 语音'};
+ const labels={search_emoji:'检索表情',browse_emoji:'分页浏览表情',select_emoji:'选择本轮表情图片',list_meme_templates:'查询模板列表',get_meme_info:'查询模板元数据',generate_meme:'生成表情包图片',render_html:'生成预定义卡片图片',synthesize_speech:'合成 AI 语音',generate_image:'云端生成 AI 图片'};
  mount(`${heading('TOOLS & PERMISSIONS','让能力，始终有清晰边界。','模型可以提出工具调用，服务端负责验证权限、参数、次数与最终发送。')}<form class="panel" id="editor"><div class="note">每次 QQ 任务最多 5 次工具调用、4 轮模型请求，最终最多发送 2 个媒体附件，每轮最多合成 1 段语音。需要在 AI 模型高级设置中声明真实工具调用能力。网页试聊仍只请求文本。</div><div class="form-grid">${Object.entries(labels).map(([key,label])=>select(label,'tools.'+key,[['deny','禁止'],['auto','自动（遵守权限与次数）'],['approval','需要审批（当前拒绝执行）']])).join('')}</div><div class="actions"><button id="save" class="button primary">保存工具权限</button></div><p class="row-detail">审批队列在 M4 开放；当前需要审批的工具始终被拒绝。图片发送前会再次检查接入权限。</p></form>`);
 }

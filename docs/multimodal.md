@@ -1,6 +1,6 @@
-# 多模态工坊 · v0.8.0
+# 多模态工坊 · v0.9.0
 
-本页介绍 Emoji 和 meme-generator。HTML 卡片独立提供固定排版能力，见 [卡片工坊说明](html-render.md)；语音见 [语音工坊](tts.md)，云端自由生图仍待后续增量。
+本页介绍 Emoji 和 meme-generator。HTML 卡片独立提供固定排版能力，见 [卡片工坊说明](html-render.md)；语音见 [语音工坊](tts.md)，云端自由生图接口见 [云端生图](image-generation.md)，真实服务尚待凭据验证。
 
 在 WebUI 打开“Emoji 表情库”，可以直接上传 PNG、JPEG、GIF、WebP，或把文件放进项目 emoji 目录后点击“重新索引”。子目录即分类，支持中文文件名。每次搜索候选数和分页数量只控制一次返回数量，不限制表情库容量。标签与别名保存在 SQLite，重启后保留。
 
@@ -32,7 +32,7 @@ AI 生成图片绑定机器人、群/私聊及用户的会话范围，跨会话�
 
 已接入 search_emoji、browse_emoji、select_emoji、list_meme_templates、get_meme_info、generate_meme。模型只传图片 ID 和结构化参数；不能执行 Shell、任意文件、网址或更改配置。每轮 QQ 任务最多 5 次工具调用、4 次模型请求、最终 2 张图片；任务 Token 预算包含全部轮次、重试、故障切换和工具 Schema。预算不足会停止，复杂任务可在管理页调整上限。
 
-网页试聊仍只请求文本。HTML 卡片和 TTS 已开放；ASR 见 [语音识别](asr.md)；QQ 来图与云端自由生图继续开发。真实 QQ 图片端到端验收和真实模型 Tool Calling 需要用户提供可用服务，本地夹具测试不代表这两项已经联调。
+网页试聊仍只请求文本。HTML 卡片和 TTS 已开放；ASR 见 [语音识别](asr.md)；云端自由生图接口已实现但未真实联调；QQ 来图继续开发。真实 QQ 图片端到端验收和真实模型 Tool Calling 需要用户提供可用服务，本地夹具测试不代表这两项已经联调。
 
 ## 真实验收与许可证
 

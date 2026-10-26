@@ -88,8 +88,9 @@ def test_render_provider_capability_and_tool_permission_scope(services, monkeypa
     services.config.current.html_render.enabled = True
     renderer = services.providers.resolve("html_render")
     assert renderer is services.renderer
-    with pytest.raises(LookupError):
-        services.providers.resolve("image_generation")
+    assert services.providers.resolve("image_generation") is not renderer
+    assert "html_render" not in services.providers.resolve("image_generation").capabilities
+    assert not services.config.current.image_generation.enabled
     calls = []
 
     async def fake_render(card):

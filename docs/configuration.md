@@ -1,4 +1,4 @@
-# 配置说明 · v0.8.0
+# 配置说明 · v0.9.0
 
 普通用户通过 WebUI 配置，不需要手改 YAML。首次启动自动生成 config.yaml，实际字段以 `Settings.model_json_schema()` 为准，登录后可访问 `/api/config/schema`。v0.3.0 会把旧数据库迁移到 schema v4，保留账户、额度和上下文，并增加表情索引、图片产物及会话范围；升级前按启动文档备份。
 
@@ -32,3 +32,6 @@ QQ 必须有 Token 才能启用。Token 修改需要重启。密钥不会出现�
 
 ## 语音识别
 `asr.enabled` 与 `asr.qq_enabled` 默认均关闭。`SOULBOT_ASR_API_KEY` 为独立识别密钥；本地模式无需密钥，但需在 WebUI 准备模型。最多 8MB 的实际 MP3/PCM WAV。热更新识别设置，QQ 连接方式变化仍需重启；QQ ASR 当前要求反向 WebSocket。详见 [ASR 说明](asr.md)。
+
+## 云端生图
+`image_generation` 默认关闭，使用独立 `SOULBOT_IMAGE_API_KEY`。可选参数留空/omit 不发送，按服务实际能力选填；每次一张，报价按当前模型/尺寸/质量确认。频率和每日图片额度持久化，费用与其它 Provider 共享。详见 [生图说明](image-generation.md)。

@@ -302,6 +302,7 @@ class MediaToolPolicies(Model):
     get_meme_info: Literal["deny", "auto", "approval"] = "auto"
     render_html: Literal["deny", "auto", "approval"] = "auto"
     synthesize_speech: Literal["deny", "auto", "approval"] = "auto"
+    generate_image: Literal["deny", "auto", "approval"] = "auto"
 
 
 class HTMLRenderSettings(Model):
@@ -377,6 +378,37 @@ class ASRSettings(Model):
         return LLMEndpoint.valid_url(value)
 
 
+class ImageGenerationSettings(Model):
+    enabled: bool = False
+    base_url: str = "https://api.openai.com/v1"
+    model: str = Field(default="", max_length=120)
+    size: str = Field(
+        default="", max_length=24, pattern=r"^(auto|[1-9][0-9]{1,3}x[1-9][0-9]{1,3})?$"
+    )
+    quality: str = Field(default="", max_length=24, pattern=r"^[a-zA-Z0-9_-]*$")
+    response_format: Literal["omit", "b64_json"] = "omit"
+    output_format: Literal["omit", "png", "jpeg", "webp"] = "omit"
+    timeout_seconds: float = Field(default=120, ge=5, le=180, allow_inf_nan=False)
+    max_prompt_chars: int = Field(default=1000, ge=10, le=4000)
+    max_calls_per_minute: int = Field(default=2, ge=1, le=10)
+    max_images_per_day: int = Field(default=10, ge=1, le=100)
+    price_cny_per_image: float | None = Field(default=None, ge=0, le=10000, allow_inf_nan=False)
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_url(cls, value):
+        return LLMEndpoint.valid_url(value)
+
+    @field_validator("size")
+    @classmethod
+    def bounded_size(cls, value):
+        if value and value != "auto":
+            width, height = map(int, value.split("x"))
+            if width * height > 16000000:
+                raise ValueError("请求图片不能超过 1600 万像素")
+        return value
+
+
 class Settings(Model):
     soulbot: Identity = Field(default_factory=Identity)
     web: Web = Field(default_factory=Web)
@@ -392,6 +424,7 @@ class Settings(Model):
     html_render: HTMLRenderSettings = Field(default_factory=HTMLRenderSettings)
     tts: SpeechSettings = Field(default_factory=SpeechSettings)
     asr: ASRSettings = Field(default_factory=ASRSettings)
+    image_generation: ImageGenerationSettings = Field(default_factory=ImageGenerationSettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):

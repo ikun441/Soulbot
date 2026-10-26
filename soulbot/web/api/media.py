@@ -191,6 +191,12 @@ def install_media_api(app, s, authorized):
         bots = s.qq_transport.connected() if s.qq_transport else []
         if not bots:
             raise HTTPException(503, "没有已连接的 QQ 机器人，请先连接 NapCat")
+        generated = (
+            data.image.startswith("media:")
+            and s.media.info(data.image.split(":", 1)[1])["source"] == "image_generation"
+        )
+        if generated and not s.agent.executor.media_enabled("send_generated_image"):
+            raise HTTPException(403, "云端生图或对应工具权限已关闭，已阻止发送")
         image = await asyncio.to_thread(read_image, s, data.image)
         now = time.time()
         with s.db.connect() as db:
@@ -204,6 +210,8 @@ def install_media_api(app, s, authorized):
                 "INSERT OR REPLACE INTO metadata VALUES ('media_owner_test_at',?)", (str(now),)
             )
         event = ChatEvent(bots[0], owner, "web-image-test", "", directed=True)
-        if not await s.agent.executor.send_image(event, image, "admin"):
+        if not await s.agent.executor.send_image(
+            event, image, "admin", "generate_image" if generated else None
+        ):
             raise HTTPException(502, "图片未获平台成功回执，请检查 QQ 登录和权限")
         return {"ok": True, "message": "平台已确认图片发送给主人，请在 QQ 核对接收"}

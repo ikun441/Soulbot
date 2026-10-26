@@ -22,8 +22,8 @@ class BudgetService:
     @staticmethod
     def cost_totals(db, day):
         row = db.execute(
-            "SELECT COALESCE(SUM(cost_cny),0),COALESCE(SUM(CASE WHEN cost_cny IS NULL AND status!='rejected' THEN 1 ELSE 0 END),0) FROM (SELECT cost_cny,status FROM llm_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM tts_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM asr_usage WHERE day=?)",
-            (day, day, day),
+            "SELECT COALESCE(SUM(cost_cny),0),COALESCE(SUM(CASE WHEN cost_cny IS NULL AND status!='rejected' THEN 1 ELSE 0 END),0) FROM (SELECT cost_cny,status FROM llm_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM tts_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM asr_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM image_usage WHERE day=?)",
+            (day, day, day, day),
         ).fetchone()
         return row[0], row[1]
 
@@ -135,6 +135,15 @@ class BudgetService:
             asr_today = db.execute(
                 "SELECT COUNT(*),COALESCE(SUM(seconds),0) FROM asr_usage WHERE day=?", (day,)
             ).fetchone()
+            images = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT id,provider,model,purpose,status,images,cost_cny,created_at,error_kind FROM image_usage ORDER BY created_at DESC LIMIT 50"
+                )
+            ]
+            image_today = db.execute(
+                "SELECT COUNT(*),COALESCE(SUM(images),0) FROM image_usage WHERE day=?", (day,)
+            ).fetchone()
         return {
             "day": day,
             "providers": rows,
@@ -146,4 +155,9 @@ class BudgetService:
             "unknown_cost_calls": unknown,
             "tts": {"recent": speech, "calls": today[0], "chars": today[1]},
             "asr": {"recent": recognition, "calls": asr_today[0], "seconds": asr_today[1]},
+            "image_generation": {
+                "recent": images,
+                "calls": image_today[0],
+                "images": image_today[1],
+            },
         }

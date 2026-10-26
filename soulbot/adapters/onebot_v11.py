@@ -182,6 +182,7 @@ def create_runtime(services):
         await services.agent.close()
         await services.speech.close()
         await services.recognition.close()
+        await services.images.close()
         await services.providers.close()
 
     driver.on_shutdown(shutdown)
