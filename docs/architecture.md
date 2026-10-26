@@ -1,4 +1,4 @@
-# 架构 · v0.9.3
+# 架构 · v0.9.4
 
 入口 main.py → 构建配置/SQLite/密钥/Registry 服务 → NoneBot2 FastAPI + HTTPX + WebSocket 驱动 → OneBot V11 适配器 → 挂载管理 WebUI。ASGI 外层网关在 QQ 关闭时拒绝 OneBot 请求。
 
