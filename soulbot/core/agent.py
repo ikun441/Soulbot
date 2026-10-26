@@ -14,7 +14,9 @@ class ActionExecutor:
         self.config, self.decision, self.audit = config, decision, audit
         self.sender = None
         self.lock = asyncio.Lock()
-        self.permissions = PermissionEngine({"send_text": "auto", "send_image": "auto"})
+        self.permissions = PermissionEngine(
+            {"send_text": "auto", "send_image": "auto", "send_voice": "auto"}
+        )
 
     async def send(self, event, text, trigger):
         return await self.deliver(event, text[:2000], trigger, "send_text")
@@ -22,12 +24,28 @@ class ActionExecutor:
     async def send_image(self, event, image, trigger):
         return await self.deliver(event, image, trigger, "send_image")
 
+    async def send_audio(self, event, audio, trigger):
+        self.permissions.require("send_voice")
+        if (
+            not self.config.current.tts.enabled
+            or self.config.current.tools.synthesize_speech != "auto"
+        ):
+            return False
+        if not await self.send(event, "【AI 合成语音】", trigger):
+            return False
+        return await self.deliver(event, audio, trigger, "send_voice")
+
     async def deliver(self, event, payload, trigger, permission):
         if not self.sender:
             return False
         self.permissions.require(permission)
         async with self.lock:
             if not await self.allowed(event, trigger):
+                return False
+            if permission == "send_voice" and (
+                not self.config.current.tts.enabled
+                or self.config.current.tools.synthesize_speech != "auto"
+            ):
                 return False
             settings = self.config.current
             delay = await asyncio.to_thread(self.decision.reserve_send, settings)
@@ -37,6 +55,11 @@ class ActionExecutor:
                     return False
                 await asyncio.to_thread(self.decision.reserve_send, self.config.current)
             if not await self.allowed(event, trigger):
+                return False
+            if permission == "send_voice" and (
+                not self.config.current.tts.enabled
+                or self.config.current.tools.synthesize_speech != "auto"
+            ):
                 return False
             try:
                 async with asyncio.timeout(10):
@@ -194,10 +217,20 @@ class SoulBotAgent:
                     from soulbot.tools.media_tools import read_image
 
                     self.services.tools.permissions.require(tool)
-                    image = await asyncio.to_thread(
-                        read_image, self.services, reference, event.scope
-                    )
-                    delivered = await self.executor.send_image(event, image, trigger) or delivered
+                    if reference.startswith("audio:"):
+                        audio = await asyncio.to_thread(
+                            self.services.audio.read, reference.split(":", 1)[1], event.scope
+                        )
+                        delivered = (
+                            await self.executor.send_audio(event, audio, trigger) or delivered
+                        )
+                    else:
+                        image = await asyncio.to_thread(
+                            read_image, self.services, reference, event.scope
+                        )
+                        delivered = (
+                            await self.executor.send_image(event, image, trigger) or delivered
+                        )
                 except (PermissionError, ValueError):
                     await asyncio.to_thread(self.db.audit, "image_send_blocked", tool)
                 except Exception:
@@ -207,7 +240,7 @@ class SoulBotAgent:
                     self.conversation.remember,
                     event.scope,
                     text,
-                    (result.text[:2000] if text_delivered else "[已发送图片]"),
+                    (result.text[:2000] if text_delivered else "[已发送媒体]"),
                     settings,
                 )
                 if trigger == "proactive":
@@ -227,7 +260,7 @@ class SoulBotAgent:
                     self.llm.chain(self.config.current, ["tool_calling"])
                 except ProviderError:
                     specs = []
-        context = ToolContext(max_total=5, scope=event.scope)
+        context = ToolContext(max_total=5, scope=event.scope, purpose=purpose)
         proposed = 0
         permitted = {spec["function"]["name"] for spec in specs}
         for _ in range(4):

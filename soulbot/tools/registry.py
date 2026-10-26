@@ -27,6 +27,7 @@ class ToolContext:
     total: int = 0
     max_total: int = 5
     scope: str | None = None
+    purpose: str = "explicit"
 
 
 class ToolRegistry:

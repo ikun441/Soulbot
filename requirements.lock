@@ -1,6 +1,13 @@
 # Verified on macOS / Python 3.11; constraints only, platform markers come from dependency metadata.
 annotated-doc==0.0.5
 annotated-types==0.8.0
+aiohttp==3.14.5
+aiohappyeyeballs==2.7.1
+aiosignal==1.4.0
+edge-tts==7.3.1
+frozenlist==1.8.0
+tabulate==0.10.0
+tinytag==2.3.2
 anyio==4.15.1
 attrs==26.1.0
 certifi==2026.10.23

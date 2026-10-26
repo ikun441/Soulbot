@@ -11,3 +11,5 @@ Pillow>=11,<13
 tzdata>=2025.1
 jsonschema>=4.23,<5
 playwright==1.64.1
+edge-tts==7.3.1
+tinytag==2.3.2

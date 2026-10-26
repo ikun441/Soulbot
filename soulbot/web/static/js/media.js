@@ -83,6 +83,6 @@ export async function renderPage(ctx){
 
 export function toolsPage(ctx){
  const {mount,heading,select}=ctx;
- const labels={search_emoji:'检索表情',browse_emoji:'分页浏览表情',select_emoji:'选择本轮表情图片',list_meme_templates:'查询模板列表',get_meme_info:'查询模板元数据',generate_meme:'生成表情包图片',render_html:'生成预定义卡片图片'};
- mount(`${heading('TOOLS & PERMISSIONS','让能力，始终有清晰边界。','模型可以提出工具调用，服务端负责验证权限、参数、次数与最终发送。')}<form class="panel" id="editor"><div class="note">每次 QQ 任务最多 5 次工具调用、4 轮模型请求，最终最多发送 2 张图片。需要在 AI 模型高级设置中声明真实工具调用能力。网页试聊仍只请求文本。</div><div class="form-grid">${Object.entries(labels).map(([key,label])=>select(label,'tools.'+key,[['deny','禁止'],['auto','自动（遵守权限与次数）'],['approval','需要审批（当前拒绝执行）']])).join('')}</div><div class="actions"><button id="save" class="button primary">保存工具权限</button></div><p class="row-detail">审批队列在 M4 开放；当前需要审批的工具始终被拒绝。图片发送前会再次检查接入权限。</p></form>`);
+ const labels={search_emoji:'检索表情',browse_emoji:'分页浏览表情',select_emoji:'选择本轮表情图片',list_meme_templates:'查询模板列表',get_meme_info:'查询模板元数据',generate_meme:'生成表情包图片',render_html:'生成预定义卡片图片',synthesize_speech:'合成 AI 语音'};
+ mount(`${heading('TOOLS & PERMISSIONS','让能力，始终有清晰边界。','模型可以提出工具调用，服务端负责验证权限、参数、次数与最终发送。')}<form class="panel" id="editor"><div class="note">每次 QQ 任务最多 5 次工具调用、4 轮模型请求，最终最多发送 2 个媒体附件，每轮最多合成 1 段语音。需要在 AI 模型高级设置中声明真实工具调用能力。网页试聊仍只请求文本。</div><div class="form-grid">${Object.entries(labels).map(([key,label])=>select(label,'tools.'+key,[['deny','禁止'],['auto','自动（遵守权限与次数）'],['approval','需要审批（当前拒绝执行）']])).join('')}</div><div class="actions"><button id="save" class="button primary">保存工具权限</button></div><p class="row-detail">审批队列在 M4 开放；当前需要审批的工具始终被拒绝。图片发送前会再次检查接入权限。</p></form>`);
 }

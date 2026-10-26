@@ -20,6 +20,14 @@ class BudgetService:
         )
 
     @staticmethod
+    def cost_totals(db, day):
+        row = db.execute(
+            "SELECT COALESCE(SUM(cost_cny),0),COALESCE(SUM(CASE WHEN cost_cny IS NULL AND status!='rejected' THEN 1 ELSE 0 END),0) FROM (SELECT cost_cny,status FROM llm_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM tts_usage WHERE day=?)",
+            (day, day),
+        ).fetchone()
+        return row[0], row[1]
+
+    @staticmethod
     def price(endpoint, input_tokens, output_tokens):
         if (
             endpoint.input_price_cny_per_million is None
@@ -42,11 +50,12 @@ class BudgetService:
             ).fetchone()
             if row["tokens"] + input_tokens + output_tokens > settings.behavior.daily_tokens:
                 raise ProviderError("budget", "今日 Token 额度不足，已停止模型调用")
-            if row["cost"] >= settings.behavior.daily_cost_cny or (
-                price is not None and row["cost"] + price > settings.behavior.daily_cost_cny
+            cost, unknown = self.cost_totals(db, day)
+            if cost >= settings.behavior.daily_cost_cny or (
+                price is not None and cost + price > settings.behavior.daily_cost_cny
             ):
                 raise ProviderError("budget", "今日费用预算不足，已停止模型调用")
-            if purpose == "proactive" and (price is None or row["unknown"]):
+            if purpose == "proactive" and (price is None or unknown):
                 raise ProviderError(
                     "unknown_cost", "存在未知费用，已暂停主动模型调用；请配置价格并核对账单"
                 )
@@ -107,6 +116,16 @@ class BudgetService:
                     "SELECT id,provider,model,purpose,status,input_tokens,output_tokens,reasoning_tokens,estimated,cost_cny,created_at,error_kind FROM llm_usage ORDER BY created_at DESC LIMIT 50"
                 )
             ]
+            speech = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT id,provider,model,purpose,status,chars,cost_cny,created_at,error_kind FROM tts_usage ORDER BY created_at DESC LIMIT 50"
+                )
+            ]
+            today = db.execute(
+                "SELECT COUNT(*),COALESCE(SUM(chars),0) FROM tts_usage WHERE day=?", (day,)
+            ).fetchone()
+            cost, unknown = self.cost_totals(db, day)
         return {
             "day": day,
             "providers": rows,
@@ -114,6 +133,7 @@ class BudgetService:
             "token_limit": settings.behavior.daily_tokens,
             "cost_limit_cny": settings.behavior.daily_cost_cny,
             "reserved_or_used_tokens": sum(r["input_tokens"] + r["output_tokens"] for r in rows),
-            "known_or_estimated_cost_cny": sum(r["cost_cny"] or 0 for r in rows),
-            "unknown_cost_calls": sum(r["unknown_cost_calls"] or 0 for r in rows),
+            "known_or_estimated_cost_cny": cost,
+            "unknown_cost_calls": unknown,
+            "tts": {"recent": speech, "calls": today[0], "chars": today[1]},
         }

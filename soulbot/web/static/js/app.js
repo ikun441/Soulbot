@@ -1,4 +1,5 @@
 import { changePage, revealPage, moveNav, toast, openDialog, closeDialog, stopMotion, wallpaperFade } from "./motion.js";
+import {speechPage, stopSpeechUI} from './speech.js';
 import {emojiPage, memePage, renderPage, toolsPage, stopMediaUI} from './media.js';
 const $ = (selector, node = document) => node.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -16,7 +17,7 @@ const paths = {
 };
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name] || paths.heart}"/></svg>`;
 paths.behavior=paths.shield; paths.usage=paths.clock;paths.emoji=paths.heart;paths.meme=paths.model;paths.tools=paths.shield;paths.account=paths.shield;paths.cards=paths.setup;
-const nav = [['dashboard','空间概览'],['setup','初次相遇','引导'],['qq','QQ 连接'],['model','AI 模型'],['personality','人格设定'],['behavior','聊天与权限'],['emoji','Emoji 表情库'],['meme','表情包工坊'],['cards','卡片工坊'],['tools','工具权限'],['usage','Token 与费用'],['appearance','外观与壁纸'],['account','登录账号'],['logs','操作记录'],['version','关于 SoulBot']];
+const nav = [['dashboard','空间概览'],['setup','初次相遇','引导'],['qq','QQ 连接'],['model','AI 模型'],['personality','人格设定'],['behavior','聊天与权限'],['emoji','Emoji 表情库'],['meme','表情包工坊'],['cards','卡片工坊'],['tts','语音工坊'],['tools','工具权限'],['usage','Token 与费用'],['appearance','外观与壁纸'],['account','登录账号'],['logs','操作记录'],['version','关于 SoulBot']];
 const steps = ['欢迎','管理员','连接 QQ','AI 模型','人格','多模态','行为权限','检查完成'];
 let B, C, S, health, step = 0, page = '', noticeTimer, dirty = false, restartToken = false;
 let chatController=null, webHistory=[];
@@ -99,7 +100,7 @@ function updateNav() {
  $('#logout').hidden = !B?.authenticated; moveNav($('#navigation'));
 }
 function mount(html) {
- stopMediaUI();
+ stopMediaUI();stopSpeechUI();
  chatController?.abort();chatController=null;
  $('#main').innerHTML = html; updateNav(); revealPage($('#main'));
  window.scrollTo({top:0,behavior:'instant'});
@@ -164,7 +165,7 @@ function wizard() {
  if (step===2) content=qqForm();
  if (step===3) content=modelForm();
  if (step===4) content=personalityForm();
- if (step===5) content=`<div class="note">本版本已开放本地 Emoji、真实 meme-generator 和 HTML 卡片。完成向导后可进入各自工坊，准备素材/浏览器并生成图片。</div>${toggle('启用本地表情库','emoji.enabled','自动扫描项目 emoji 目录，支持中文分类和标签。')}${toggle('启用 HTML 卡片','html_render.enabled','先在卡片工坊准备项目专用 Chromium；不调用云端生图。')}<p class="muted">meme-generator 与 Chromium 均为选配，安装前会说明下载内容。TTS、ASR、云端生图与搜索将在后续更新实现，现在可以跳过。</p>`;
+ if (step===5) content=`<div class="note">本版本已开放本地 Emoji、真实 meme-generator 和 HTML 卡片。完成向导后可进入各自工坊，准备素材/浏览器并生成图片。</div>${toggle('启用本地表情库','emoji.enabled','自动扫描项目 emoji 目录，支持中文分类和标签。')}${toggle('启用 HTML 卡片','html_render.enabled','先在卡片工坊准备项目专用 Chromium；不调用云端生图。')}<p class="muted">meme-generator 与 Chromium 均为选配，安装前会说明下载内容。语音工坊已支持 Edge 与兼容接口，可在完成向导后单独配置和试音。ASR、云端生图与搜索继续开发，现在可以跳过。</p>`;
  if (step===6) content=permissionsForm();
  if (step===7) content=`<div class="note">基础配置检查已就绪。完成后可进入仪表盘；未配置的 QQ 和 AI 服务可以稍后补充。</div><div class="rows"><div class="row"><span>管理员账户</span>${badge(B.has_admin?'已创建':'未创建',B.has_admin?'good':'wait')}</div><div class="row"><span>QQ 适配器</span>${badge(C.qq.enabled?'启用，重启后应用':'暂未启用')}</div><div class="row"><span>LLM 接入信息</span>${badge(C.llm.model&&S.llm_api_key?'已保存，请运行真实测试':'可稍后配置')}</div><div class="row"><span>多模态与 meme-generator</span>${badge('Emoji / meme 已开放')}</div><div class="row"><span>自主社交 / QQ 空间</span>${badge('关闭','good')}</div></div><div class="actions"><button type="button" id="final-check" class="button outline">运行本机健康检查</button></div><p id="final-result" class="note" hidden></p>`;
  mount(`${heading('FIRST HELLO','从这里，遇见你的 SoulBot。','每一步都附有说明。选配功能可以留到以后，已保存的进度不会丢失。')}<div class="wizard-steps" aria-label="配置步骤">${steps.map((name,i)=>`<span class="step-dot ${i===step?'current':i<step?'done':''}" ${i===step?'aria-current="step"':''}>${String(i+1).padStart(2,'0')} ${name}</span>`).join('')}</div><form id="editor" class="panel"><div class="wizard-title"><span class="step-number">${String(step+1).padStart(2,'0')}</span><div><div class="mini-label">LET’S MAKE IT YOURS</div><h2>${steps[step]}</h2></div></div><div class="wizard-body">${content}</div><div class="wizard-footer"><span class="save-status">${B.has_admin?'点击下一步保存配置':'先创建账户，再安全保存进度'}</span><div class="actions">${step>0?'<button type="button" id="previous" class="button quiet">上一步</button>':''}<button type="button" id="next" class="button primary">${step===0?'开始配置':step===5?'跳过，稍后配置':step===7?'完成并进入空间':'保存并继续'} ${icon('arrow')}</button></div></div></form>`);
@@ -176,7 +177,7 @@ function wizard() {
   step++;if(B.authenticated)await send('/api/wizard/progress','PUT',{step});dirty=false;changePage(wizard);
  },e.currentTarget);
  const previous=$('#previous');if(previous)previous.onclick=e=>guarded(async()=>{if(step>=2&&!await saveEditor())return;step--;if(B.authenticated)await send('/api/wizard/progress','PUT',{step});dirty=false;changePage(wizard,'backward');},e.currentTarget);
- const check=$('#final-check');if(check)check.onclick=e=>guarded(async()=>{health=await api('/api/health');$('#final-result').hidden=false;$('#final-result').textContent=`SQLite：${health.sqlite?'正常':'异常'}；NoneBot：${health.nonebot?'已初始化':'未加载'}；${health.python}；QQ：${health.qq_connected?'已连接':'未连接'}。模型连接测试请在 AI 模型页面运行；meme API 可在表情包工坊单独测试；TTS 尚未开放。`;},e.currentTarget);
+ const check=$('#final-check');if(check)check.onclick=e=>guarded(async()=>{health=await api('/api/health');$('#final-result').hidden=false;$('#final-result').textContent=`SQLite：${health.sqlite?'正常':'异常'}；NoneBot：${health.nonebot?'已初始化':'未加载'}；${health.python}；QQ：${health.qq_connected?'已连接':'未连接'}。模型连接测试请在 AI 模型页面运行；meme API 可在表情包工坊单独测试；语音可在语音工坊实际生成试听。`;},e.currentTarget);
  bindQQ();if(step===3)bindModel();
 }
 function appearance() {
@@ -193,19 +194,19 @@ async function logs() {
 }
 function version() {
  mount(`${heading('ABOUT SOULBOT','保持好奇，慢慢生长。','人格、记忆与社交能力，正在一步步构建。')}
- <section class="panel"><div class="section-title" style="margin-top:0"><h2>SoulBot ${esc(B.version)}</h2>${badge('M2 · 图片与卡片表达','good')}</div>
- <p class="muted">原生 WebUI · FastAPI · NoneBot2 · SQLite</p><article class="release"><div class="mini-label">2026.10.25 / HTML CARDS</div><h3 style="margin-top:10px">让值得记住的话，有自己的模样。</h3>
- <ul><li>Chromium 生成中文文字、引用和清单卡片，支持三种配色。</li><li>卡片工坊提供准备环境、实际生成、私有预览和下载。</li><li>Emoji、meme-generator 和三个可选表情模板仓库。</li><li>.env 管理登录账号、密码哈希和反向 / 反代 WS 地址。</li><li>QQ 文本处理、模型工具、会话隔离、Token 与费用限制。</li></ul></article>
- <div class="note warning">M2 仍在推进：TTS/ASR 与云端生图尚未开放。持续情绪与长期记忆在 M3，日记和自主行为在 M4，空间发布在 M5。真实 QQ 与外部模型联调仍需配置可用账户。</div>
- <div class="actions"><a class="button outline" href="https://github.com/ikun441/Soulbot" target="_blank" rel="noopener noreferrer">GitHub 仓库 ↗</a><a class="button quiet" href="#cards">打开卡片工坊</a></div></section>`);
+ <section class="panel"><div class="section-title" style="margin-top:0"><h2>SoulBot ${esc(B.version)}</h2>${badge('M2 · 图片与语音表达','good')}</div>
+ <p class="muted">原生 WebUI · FastAPI · NoneBot2 · SQLite</p><article class="release"><div class="mini-label">2026.10.26 / VOICE STUDIO</div><h3 style="margin-top:10px">让文字，拥有声音。</h3>
+ <ul><li>语音工坊、实际 Edge 音色与独立兼容语音接口。</li><li>语音试听、下载、主人确认发送，以及持久字符与费用限制。</li><li>Chromium 生成中文文字、引用和清单卡片，支持三种配色。</li><li>卡片工坊提供准备环境、实际生成、私有预览和下载。</li><li>Emoji、meme-generator 和三个可选表情模板仓库。</li><li>.env 管理登录账号、密码哈希和反向 / 反代 WS 地址。</li><li>QQ 文本处理、模型工具、会话隔离、Token 与费用限制。</li></ul></article>
+ <div class="note warning">M2 仍在推进：TTS 已接入；ASR 与云端生图继续开发。持续情绪与长期记忆在 M3，日记和自主行为在 M4，空间发布在 M5。真实 QQ 与外部模型联调仍需配置可用账户。</div>
+ <div class="actions"><a class="button outline" href="https://github.com/ikun441/Soulbot" target="_blank" rel="noopener noreferrer">GitHub 仓库 ↗</a><a class="button quiet" href="#tts">打开语音工坊</a></div></section>`);
 }
 function render(target) {
  page=target;
  if(!B.has_admin){step=target==='setup'?step:0;page='setup';wizard();return;}
  if(!B.authenticated){renderLogin();return;}
- if(target==='dashboard')dashboard();else if(target==='setup')wizard();else if(['qq','model','personality'].includes(target))editorPage(target);else if(target==='behavior')behaviorPage();else if(target==='emoji')guarded(()=>emojiPage(mediaContext()));else if(target==='meme')guarded(()=>memePage(mediaContext()));else if(target==='cards')guarded(()=>renderPage(mediaContext()));else if(target==='tools')toolsPage(mediaContext());else if(target==='usage')guarded(usagePage);else if(target==='appearance')appearance();else if(target==='account')guarded(accountPage);else if(target==='logs')guarded(logs);else if(target==='version')version();else{page='dashboard';dashboard();}
+ if(target==='dashboard')dashboard();else if(target==='setup')wizard();else if(['qq','model','personality'].includes(target))editorPage(target);else if(target==='behavior')behaviorPage();else if(target==='emoji')guarded(()=>emojiPage(mediaContext()));else if(target==='meme')guarded(()=>memePage(mediaContext()));else if(target==='cards')guarded(()=>renderPage(mediaContext()));else if(target==='tts')guarded(()=>speechPage(mediaContext()));else if(target==='tools')toolsPage(mediaContext());else if(target==='usage')guarded(usagePage);else if(target==='appearance')appearance();else if(target==='account')guarded(accountPage);else if(target==='logs')guarded(logs);else if(target==='version')version();else{page='dashboard';dashboard();}
 }
-function mediaContext(){return {mount,heading,field,toggle,select,esc,api,send,guarded,notice,confirmAction,saveEditor,config:()=>C,motion:()=>document.body.dataset.motion==='true'};}
+function mediaContext(){return {mount,heading,field,toggle,select,secret,esc,api,send,guarded,notice,confirmAction,saveEditor,config:()=>C,motion:()=>document.body.dataset.motion==='true'};}
 document.addEventListener('click',e=>{const a=e.target.closest('a[href^="#"]');if(!a)return;e.preventDefault();if(dirty){notice('请先保存当前表单，再切换页面。',true);return;}const target=a.hash.slice(1);const backward=nav.findIndex(item=>item[0]===target)<nav.findIndex(item=>item[0]===page);changePage(()=>render(target),backward?'backward':'forward');});
 $('#logout').onclick=e=>guarded(async()=>{await send('/api/auth/logout','POST');B.authenticated=false;dirty=false;C=null;webHistory=[];chatController?.abort();$('#wallpaper').replaceChildren();renderLogin();},e.currentTarget);
 $('#confirm-dialog').addEventListener('cancel',event=>{event.preventDefault();closeDialog(event.currentTarget);});
@@ -254,5 +255,6 @@ async function usagePage(){
  const metrics=(title,value,note)=>`<article class="panel metric"><div class="metric-head">${title}</div><div class="metric-value">${esc(value)}</div><div class="metric-note">${esc(note)}</div></article>`;
  const status={pending:'已预留',completed:'实际用量',estimated:'保守估算',uncertain:'消耗未确认',rejected:'请求被拒绝'};
  mount(`${heading('USAGE & COST','看见每一份消耗。','每次真实调用、重试和备用服务都有记录。价格未知会明确标出。')}<div class="metric-grid">${metrics('今日 Token',data.reserved_or_used_tokens,`每日上限 ${data.token_limit}`)}${metrics('已知 / 估算费用',data.known_or_estimated_cost_cny.toFixed(6)+' 元',data.unknown_cost_calls?'另有未知费用，不能视为总费用':'仅按你配置的服务商价格计算')}${metrics('未知费用调用',data.unknown_cost_calls,'价格未配置时不显示为免费')}${metrics('每日费用上限',data.cost_limit_cny+' 元',`统计日 ${data.day}`)}</div><section class="panel" style="margin-top:20px"><div class="section-title" style="margin-top:0"><h2>最近的模型调用</h2><button class="button quiet small" id="refresh-usage">刷新</button></div><p class="muted">重启不清零当日额度；超时、中断和缺少用量时会保守保留预留值。</p><div class="usage-table">${data.recent.length?`<table><thead><tr><th>服务 / 模型</th><th>状态</th><th>输入</th><th>输出</th><th>推理</th><th>费用</th></tr></thead><tbody>${data.recent.map(item=>`<tr><td>${esc(item.provider)}<small>${esc(item.model)}</small></td><td>${esc(status[item.status]||item.status)}</td><td>${item.input_tokens}</td><td>${item.output_tokens}</td><td>${item.reasoning_tokens??'未提供'}</td><td>${item.cost_cny===null?'未知':item.cost_cny.toFixed(6)+' 元'}</td></tr>`).join('')}</tbody></table>`:'<p class="empty-state">还没有模型调用。可以先到 AI 模型页面运行连接测试。</p>'}</div></section>`);
+ $('#main').insertAdjacentHTML('beforeend',`<section class="panel media-section"><h2>语音生成记录</h2><p class="note">今日 ${data.tts.calls} 次调用 · ${data.tts.chars} 字符。字符数独立于 Token；费用已纳入上方总额。Edge 无 API 报价费用，云端价格未知时明确标记未知。</p><div class="usage-table">${data.tts.recent.length?`<table><thead><tr><th>服务 / 模型</th><th>状态</th><th>字符</th><th>费用</th></tr></thead><tbody>${data.tts.recent.map(item=>`<tr><td>${esc(item.provider)}<small>${esc(item.model)}</small></td><td>${esc(status[item.status]||item.status)}</td><td>${item.chars}</td><td>${item.cost_cny===null?'未知':item.cost_cny.toFixed(6)+' 元'}</td></tr>`).join('')}</tbody></table>`:'<p class="empty-state">还没有语音调用记录。</p>'}</div></section>`);
  $('#refresh-usage').onclick=e=>guarded(usagePage,e.currentTarget);
 }

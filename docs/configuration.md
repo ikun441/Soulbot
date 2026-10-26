@@ -1,4 +1,4 @@
-# 配置说明 · v0.6.0
+# 配置说明 · v0.7.0
 
 普通用户通过 WebUI 配置，不需要手改 YAML。首次启动自动生成 config.yaml，实际字段以 `Settings.model_json_schema()` 为准，登录后可访问 `/api/config/schema`。v0.3.0 会把旧数据库迁移到 schema v4，保留账户、额度和上下文，并增加表情索引、图片产物及会话范围；升级前按启动文档备份。
 
@@ -26,3 +26,6 @@ WebUI 账号使用 `.env` 中的 `SOULBOT_WEBUI_USERNAME`、`SOULBOT_WEBUI_PASSW
 QQ 必须有 Token 才能启用。Token 修改需要重启。密钥不会出现在 YAML、GET 配置或导出中。导出还会清空主人 QQ，但不自动审查用户填写的 Prompt，请自行检查。
 
 备份/数据库均为私密文件。完整备份应停止程序并复制 config.yaml、data 和实际 .env，详见 start.md。
+
+## 语音设置
+`tts` 与聊天模型配置独立，默认关闭。密钥使用 `SOULBOT_TTS_API_KEY`，普通读取仅返回配置状态。音色、语速、字符/调用上限和兼容服务参数均可在语音工坊热更新，详见 [TTS 说明](tts.md)。

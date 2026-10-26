@@ -18,4 +18,4 @@ v0.3.0 已通过实际安装验收：Python 3.11 / macOS arm64，固定 meme-gen
 
 ## 其它 Provider
 
-LLM 以 HTTPX 实现 OpenAI 兼容 Chat Completions，可查询服务商模型、按需 SSE、解析服务商用量，按用户填写的价格估算费用。限流和服务端错误有限重试；未知或可能已计费结果保留预算。网页试聊只请求文本；QQ 可向声明支持 Tool Calling 的模型开放有界媒体工具，外部模型服务实际联调仍需用户凭据。TTS/ASR/云生图/Search/HTML Render 继续在后续增量实现；HTML Render 不作为自由生图的等价替代。QQ 空间接口待 M5 验证，不支持时只保留草稿。
+LLM 以 HTTPX 实现 OpenAI 兼容 Chat Completions，可查询服务商模型、按需 SSE、解析服务商用量，按用户填写的价格估算费用。限流和服务端错误有限重试；未知或可能已计费结果保留预算。网页试聊只请求文本；QQ 可向声明支持 Tool Calling 的模型开放有界媒体工具，外部模型服务实际联调仍需用户凭据。TTS 已接入 Edge 和独立的 OpenAI 兼容语音接口，HTML Render 已提供固定卡片模板。ASR/云生图/Search 继续在后续增量实现；HTML Render 不作为自由生图的等价替代。QQ 空间接口待 M5 验证，不支持时只保留草稿。

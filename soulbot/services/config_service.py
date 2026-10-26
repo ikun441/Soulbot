@@ -301,6 +301,7 @@ class MediaToolPolicies(Model):
     list_meme_templates: Literal["deny", "auto", "approval"] = "auto"
     get_meme_info: Literal["deny", "auto", "approval"] = "auto"
     render_html: Literal["deny", "auto", "approval"] = "auto"
+    synthesize_speech: Literal["deny", "auto", "approval"] = "auto"
 
 
 class HTMLRenderSettings(Model):
@@ -308,6 +309,52 @@ class HTMLRenderSettings(Model):
     width: int = Field(default=800, ge=480, le=1200)
     max_height: int = Field(default=1800, ge=400, le=2400)
     timeout_seconds: float = Field(default=20, ge=5, le=60, allow_inf_nan=False)
+
+
+class EdgeSpeechSettings(Model):
+    voice: str = Field(
+        default="zh-CN-XiaoxiaoNeural", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_\-]+$"
+    )
+    rate_percent: int = Field(default=0, ge=-50, le=100)
+    pitch_hz: int = Field(default=0, ge=-50, le=50)
+    volume_percent: int = Field(default=0, ge=-50, le=50)
+
+
+class CompatibleSpeechSettings(Model):
+    base_url: str = "https://api.openai.com/v1"
+    model: str = Field(default="", max_length=120)
+    voice: str = Field(default="", max_length=100)
+    response_format: Literal["mp3", "wav"] = "mp3"
+    speed: float = Field(default=1, ge=0.25, le=4, allow_inf_nan=False)
+    supports_instructions: bool = False
+    instructions: str = Field(default="", max_length=500)
+    price_cny_per_1000_chars: float | None = Field(
+        default=None, ge=0, le=10000, allow_inf_nan=False
+    )
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_url(cls, value):
+        return LLMEndpoint.valid_url(value)
+
+    @model_validator(mode="after")
+    def declared_instructions(self):
+        if self.instructions and not self.supports_instructions:
+            raise ValueError("请先确认语音模型支持 instructions，再设置语音风格指令")
+        return self
+
+
+class SpeechSettings(Model):
+    enabled: bool = False
+    provider: Literal["edge", "openai_compatible"] = "edge"
+    edge: EdgeSpeechSettings = Field(default_factory=EdgeSpeechSettings)
+    compatible: CompatibleSpeechSettings = Field(default_factory=CompatibleSpeechSettings)
+    timeout_seconds: float = Field(default=40, ge=5, le=120, allow_inf_nan=False)
+    max_text_chars: int = Field(default=500, ge=10, le=2000)
+    max_duration_seconds: int = Field(default=120, ge=10, le=180)
+    max_calls_per_minute: int = Field(default=3, ge=1, le=20)
+    max_calls_per_day: int = Field(default=50, ge=1, le=1000)
+    max_chars_per_day: int = Field(default=10000, ge=100, le=1000000)
 
 
 class Settings(Model):
@@ -323,6 +370,7 @@ class Settings(Model):
     meme: MemeSettings = Field(default_factory=MemeSettings)
     tools: MediaToolPolicies = Field(default_factory=MediaToolPolicies)
     html_render: HTMLRenderSettings = Field(default_factory=HTMLRenderSettings)
+    tts: SpeechSettings = Field(default_factory=SpeechSettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):

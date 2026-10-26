@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 4:
+            if version > 5:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -104,5 +104,23 @@ class Database:
                     BEGIN IMMEDIATE;
                     ALTER TABLE media_artifacts ADD COLUMN scope TEXT NOT NULL DEFAULT 'admin';
                     UPDATE metadata SET value='4' WHERE key='schema_version';
+                    COMMIT;
+                """)
+            if version < 5:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS audio_artifacts (
+                        id TEXT PRIMARY KEY, filename TEXT NOT NULL, mime TEXT NOT NULL,
+                        format TEXT NOT NULL, sample_rate INTEGER NOT NULL, channels INTEGER NOT NULL,
+                        duration REAL NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
+                        source TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL,
+                        scope TEXT NOT NULL);
+                    CREATE TABLE IF NOT EXISTS tts_usage (
+                        id TEXT PRIMARY KEY, day TEXT NOT NULL, provider TEXT NOT NULL,
+                        model TEXT NOT NULL, purpose TEXT NOT NULL, status TEXT NOT NULL,
+                        chars INTEGER NOT NULL, cost_cny REAL, created_at REAL NOT NULL,
+                        error_kind TEXT);
+                    CREATE INDEX IF NOT EXISTS tts_usage_day ON tts_usage(day, created_at);
+                    UPDATE metadata SET value='5' WHERE key='schema_version';
                     COMMIT;
                 """)

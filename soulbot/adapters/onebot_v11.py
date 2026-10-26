@@ -16,6 +16,7 @@ from nonebot.adapters.onebot.v11 import (
 
 from soulbot.app import create_web_app
 from soulbot.core.events import ChatEvent
+from soulbot.services.audio_service import AudioPayload
 from soulbot.services.media_service import ImagePayload
 
 
@@ -51,7 +52,9 @@ class NoneBotTransport:
     async def __call__(self, event, text):
         bot = nonebot.get_bot(event.bot_id)
         message = (
-            MessageSegment.image("base64://" + base64.b64encode(text.data).decode())
+            MessageSegment.record("base64://" + base64.b64encode(text.data).decode())
+            if isinstance(text, AudioPayload)
+            else MessageSegment.image("base64://" + base64.b64encode(text.data).decode())
             if isinstance(text, ImagePayload)
             else MessageSegment.text(text)
         )
@@ -150,6 +153,7 @@ def create_runtime(services):
     async def shutdown():
         await services.meme.close()
         await services.agent.close()
+        await services.speech.close()
         await services.providers.close()
 
     driver.on_shutdown(shutdown)

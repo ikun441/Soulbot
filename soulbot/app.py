@@ -27,6 +27,7 @@ from soulbot.core.budget import BudgetService
 from soulbot.core.permissions import PermissionEngine
 from soulbot.providers.llm.base import ProviderError
 from soulbot.providers.registry import ProviderRegistry
+from soulbot.services.audio_service import AudioStore
 from soulbot.services.auth_service import AccountChange, AuthService
 from soulbot.services.auth_service import AdminAccount as Account
 from soulbot.services.config_service import ConfigService, Model, Settings
@@ -36,6 +37,7 @@ from soulbot.services.media_service import MediaError, MediaStore
 from soulbot.services.meme_service import MemeService
 from soulbot.services.render_service import HTMLRenderService
 from soulbot.services.secret_service import SecretService
+from soulbot.services.tts_service import TTSService
 from soulbot.storage.database import Database
 from soulbot.tools.emoji import EmojiLibrary
 from soulbot.tools.media_tools import register_media_tools
@@ -54,6 +56,7 @@ class SecretUpdate(Model):
     onebot_access_token: SecretStr | None = None
     llm_fallback_1: SecretStr | None = None
     llm_fallback_2: SecretStr | None = None
+    tts_api_key: SecretStr | None = None
 
 
 class Progress(Model):
@@ -81,6 +84,8 @@ class Services:
     emoji: EmojiLibrary | None = None
     meme: MemeService | None = None
     renderer: HTMLRenderService | None = None
+    audio: AudioStore | None = None
+    speech: TTSService | None = None
 
 
 def build_services(root):
@@ -109,6 +114,9 @@ def build_services(root):
     )
     services.media = MediaStore(root, db)
     services.media.cleanup()
+    services.audio = AudioStore(root, db)
+    services.audio.cleanup()
+    services.speech = TTSService(config, services.secrets, services.providers, services.budget, db)
     services.emoji = EmojiLibrary(root, config, db)
     if config.current.emoji.enabled:
         services.emoji.refresh()
@@ -120,6 +128,9 @@ def build_services(root):
     with db.connect() as connection:
         connection.execute(
             "UPDATE llm_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
+        )
+        connection.execute(
+            "UPDATE tts_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
         )
     return services
 
@@ -138,6 +149,7 @@ def create_web_app(root: Path, services=None):
         finally:
             await s.meme.close()
             await s.agent.close()
+            await s.speech.close()
             await s.providers.close()
 
     app = FastAPI(
@@ -391,7 +403,7 @@ def create_web_app(root: Path, services=None):
             "usage": s.budget.summary(s.config.current),
             "meme_generator": s.meme.status(),
             "restart_required": restart_required(),
-            "stage": "M2 · Emoji 与表情包生成",
+            "stage": "M2 · 图片、卡片与语音",
         }
 
     def get_bots():
@@ -444,6 +456,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.media import install_media_api
 
     install_media_api(app, s, authorized)
+    from soulbot.web.api.speech import install_speech_api
+
+    install_speech_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

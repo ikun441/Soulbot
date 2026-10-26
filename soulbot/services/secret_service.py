@@ -10,6 +10,7 @@ NAMES = {
     "onebot_access_token": "SOULBOT_ONEBOT_ACCESS_TOKEN",
     "llm_fallback_1": "SOULBOT_LLM_FALLBACK_1",
     "llm_fallback_2": "SOULBOT_LLM_FALLBACK_2",
+    "tts_api_key": "SOULBOT_TTS_API_KEY",
 }
 
 
