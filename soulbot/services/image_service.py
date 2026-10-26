@@ -1,6 +1,9 @@
 import asyncio
+import hashlib
+import json
 import time
 import uuid
+from datetime import datetime, timezone
 
 from soulbot.providers.image.base import ImageGenerationError
 from soulbot.providers.image.openai_compatible import OpenAICompatibleImageProvider
@@ -22,6 +25,51 @@ class ImageGenerationService:
             default=True,
         )
         self.jobs, self.closed = set(), False
+        self.last_test = None
+
+    def _provider_fingerprint(self, settings):
+        policy = settings.image_generation
+        value = {
+            "base_url": policy.base_url,
+            "model": policy.model,
+            "size": policy.size,
+            "quality": policy.quality,
+            "response_format": policy.response_format,
+            "output_format": policy.output_format,
+            # Hash the secret together with the configuration; never return or persist it.
+            "key": self.secrets.get("image_api_key"),
+        }
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def diagnostics(self):
+        settings = self.config.current
+        policy = settings.image_generation
+        configured = self.configured()
+        if not policy.enabled:
+            state = "disabled"
+        elif not configured:
+            state = "unconfigured"
+        elif self.last_test is None or self.last_test["fingerprint"] != self._provider_fingerprint(
+            settings
+        ):
+            state = "not_tested"
+        else:
+            state = "available" if self.last_test["ok"] else "failed"
+        current_test = self.last_test if state in {"available", "failed"} else None
+        return {
+            "state": state,
+            "last_test_at": current_test["tested_at"] if current_test else None,
+            "last_error_kind": current_test["error_kind"] if current_test else None,
+        }
+
+    def _record_test(self, fingerprint, *, ok, error_kind=None):
+        self.last_test = {
+            "fingerprint": fingerprint,
+            "tested_at": datetime.now(timezone.utc).isoformat(),
+            "ok": ok,
+            "error_kind": error_kind,
+        }
 
     def configured(self):
         return bool(
@@ -79,27 +127,34 @@ class ImageGenerationService:
         task = asyncio.current_task()
         self.jobs.add(task)
         key = None
+        fingerprint = None
         try:
             # Reserve synchronously so cancellation cannot lose a billable attempt.
             key = self.reserve(settings, purpose)
+            fingerprint = self._provider_fingerprint(settings)
             async with asyncio.timeout(policy.timeout_seconds):
                 result = await self.registry.resolve("image_generation").generate(prompt, policy)
+            self._record_test(fingerprint, ok=True)
             self.finish(key, "completed")
             return result
         except asyncio.CancelledError:
             if key:
+                self._record_test(fingerprint, ok=False, error_kind="cancelled")
                 self.finish(key, "uncertain", "cancelled")
             raise
         except TimeoutError:
             if key:
+                self._record_test(fingerprint, ok=False, error_kind="timeout")
                 self.finish(key, "uncertain", "timeout")
             raise ImageGenerationError("timeout", "生图超时，服务商可能已计费", True) from None
         except ImageGenerationError as error:
             if key:
+                self._record_test(fingerprint, ok=False, error_kind=error.kind)
                 self.finish(key, "uncertain" if error.uncertain else "rejected", error.kind)
             raise
         except Exception:
             if key:
+                self._record_test(fingerprint, ok=False, error_kind="internal")
                 self.finish(key, "uncertain", "internal")
             raise ImageGenerationError("internal", "图片生成未完成，请检查服务配置", True) from None
         finally:

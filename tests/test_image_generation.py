@@ -107,6 +107,37 @@ def test_provider_minimal_contract_independent_key_and_optional_capabilities(ser
     assert bodies[1]["response_format"] == "b64_json" and bodies[1]["output_format"] == "png"
 
 
+def test_provider_diagnostics_track_real_attempts_and_invalidate_on_config_change(services):
+    enable(services)
+    image_service = services.images
+    assert image_service.diagnostics()["state"] == "not_tested"
+    services.config.current.image_generation.enabled = False
+    assert image_service.diagnostics()["state"] == "disabled"
+    services.config.current.image_generation.enabled = True
+    assert image_service.diagnostics()["state"] == "not_tested"
+
+    asyncio.run(image_service.generate("fixture success"))
+    diagnostics = image_service.diagnostics()
+    assert diagnostics["state"] == "available" and diagnostics["last_test_at"]
+    assert "fixture-image-key" not in str(diagnostics)
+    services.config.current.image_generation.model = "changed-model"
+    assert image_service.diagnostics() == {
+        "state": "not_tested",
+        "last_test_at": None,
+        "last_error_kind": None,
+    }
+
+    services.providers.resolve("image_generation").transport = httpx.MockTransport(
+        lambda request: httpx.Response(401, text="secret provider body")
+    )
+    with pytest.raises(ImageGenerationError):
+        asyncio.run(image_service.generate("fixture failure"))
+    diagnostics = image_service.diagnostics()
+    assert diagnostics["state"] == "failed" and diagnostics["last_error_kind"] == "authentication"
+    services.secrets.save({"image_api_key": "rotated-key"})
+    assert image_service.diagnostics()["state"] == "not_tested"
+
+
 @pytest.mark.parametrize(
     "status,kind",
     [

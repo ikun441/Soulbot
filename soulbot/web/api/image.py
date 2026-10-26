@@ -13,6 +13,7 @@ def install_image_api(app, s, authorized):
         return {
             "enabled": s.config.current.image_generation.enabled,
             "configured": s.images.configured(),
+            "provider_test": s.images.diagnostics(),
             "active": len(s.images.jobs),
             "usage": s.budget.summary(s.config.current)["image_generation"],
         }
