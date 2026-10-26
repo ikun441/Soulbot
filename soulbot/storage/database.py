@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 8:
+            if version > 9:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -176,5 +176,25 @@ class Database:
                     CREATE INDEX IF NOT EXISTS social_observations_time
                         ON social_observations(created_at);
                     UPDATE metadata SET value='8' WHERE key='schema_version';
+                    COMMIT;
+                """)
+            if version < 9:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS memories (
+                        id INTEGER PRIMARY KEY, bot_id TEXT NOT NULL, user_id TEXT NOT NULL,
+                        group_id TEXT NOT NULL DEFAULT '',
+                        kind TEXT NOT NULL, content TEXT NOT NULL, source TEXT NOT NULL,
+                        importance INTEGER NOT NULL CHECK(importance BETWEEN 1 AND 5),
+                        confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+                        long_term_allowed INTEGER NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL CHECK(status IN ('candidate','approved','rejected','archived')),
+                        fingerprint TEXT NOT NULL UNIQUE, expires_at REAL,
+                        created_at REAL NOT NULL, updated_at REAL NOT NULL,
+                        revision INTEGER NOT NULL DEFAULT 0);
+                    CREATE INDEX IF NOT EXISTS memory_scope ON memories(bot_id,group_id,user_id,status);
+                    CREATE TABLE IF NOT EXISTS memory_preferences (
+                        scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+                    UPDATE metadata SET value='9' WHERE key='schema_version';
                     COMMIT;
                 """)

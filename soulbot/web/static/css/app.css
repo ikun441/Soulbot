@@ -7,3 +7,8 @@
 .emotion-chart svg { display: block; width: 100%; max-height: 240px; overflow: visible; }
 .emotion-chart svg text { font-size: 8px; fill: currentColor; }
 .emotion-chart .row-detail { line-height: 1.8; }
+
+.memory-text{min-width:220px;max-width:360px;white-space:normal;overflow-wrap:anywhere}
+#memory-preview-result{white-space:pre-wrap;overflow-wrap:anywhere}
+
+.switch-row .row-detail{display:block;margin-top:4px}

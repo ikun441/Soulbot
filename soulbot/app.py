@@ -25,6 +25,7 @@ from soulbot import VERSION
 from soulbot.core.agent import SoulBotAgent
 from soulbot.core.budget import BudgetService
 from soulbot.core.emotion import EmotionEngine
+from soulbot.core.memory import MemoryEngine
 from soulbot.core.permissions import PermissionEngine
 from soulbot.core.relationship import RelationshipEngine
 from soulbot.core.social_state import StateConflict
@@ -99,6 +100,7 @@ class Services:
     diagnostics: ProviderDiagnostics | None = None
     emotion: EmotionEngine | None = None
     relationships: RelationshipEngine | None = None
+    memory: MemoryEngine | None = None
 
 
 def build_services(root):
@@ -124,6 +126,7 @@ def build_services(root):
     services.budget = BudgetService(db)
     services.emotion = EmotionEngine(config, db)
     services.relationships = RelationshipEngine(config, db)
+    services.memory = MemoryEngine(config, db)
     services.diagnostics = ProviderDiagnostics()
     services.llm = LLMService(
         config,
@@ -465,7 +468,7 @@ def create_web_app(root: Path, services=None):
             "usage": s.budget.summary(s.config.current),
             "meme_generator": s.meme.status(),
             "restart_required": restart_required(),
-            "stage": "M3 · 好感度与全局模拟情绪",
+            "stage": "M3 · 人格与长期记忆",
             "emotion": s.emotion.snapshot(),
         }
 
@@ -547,6 +550,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.social import install_social_api
 
     install_social_api(app, s, authorized)
+    from soulbot.web.api.memory import install_memory_api
+
+    install_memory_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

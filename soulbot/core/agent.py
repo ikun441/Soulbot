@@ -130,6 +130,8 @@ class SoulBotAgent:
             return
         if not await asyncio.to_thread(self.conversation.unseen, event):
             return
+        if await self.memory_command(event):
+            return
         if await self.admin_command(event):
             return
         trigger = await asyncio.to_thread(self.decision.classify, self.config.current, event)
@@ -287,6 +289,8 @@ class SoulBotAgent:
         relationships = getattr(self.services, "relationships", None)
         emotion_state = await asyncio.to_thread(emotion.snapshot) if emotion else None
         relationship = await asyncio.to_thread(relationships.get, event) if relationships else None
+        memory = getattr(self.services, "memory", None)
+        memories = await asyncio.to_thread(memory.retrieve, event) if memory else []
         messages = [
             system_prompt(
                 settings,
@@ -294,6 +298,7 @@ class SoulBotAgent:
                 owner=event.user_id == settings.personality.owner_qq,
                 emotion=emotion_state,
                 relationship=relationship,
+                memories=memories,
             ),
             *history,
             {"role": "user", "content": text},
@@ -416,6 +421,48 @@ class SoulBotAgent:
                     }
                 )
         raise ProviderError("tool_limit", "模型工具对话已达轮数限制，已停止任务")
+
+    async def memory_command(self, event):
+        text = event.text.strip()
+        command = text.split(maxsplit=1)[0] if text else ""
+        if command not in {"/记住", "/记忆", "/忘记我"}:
+            return False
+        memory = getattr(self.services, "memory", None)
+        settings = self.config.current
+        if not memory or not await asyncio.to_thread(self.decision.access, settings, event):
+            return True
+        if event.group_id and not (event.directed or event.reply_target == "bot"):
+            return True
+        if not await self.executor.allowed(event, "direct"):
+            return True
+        if not await asyncio.to_thread(self.decision.claim, settings, event, "direct"):
+            return True
+        if text == "/忘记我":
+            count = await asyncio.to_thread(memory.forget, event)
+            reply = f"已删除当前会话中属于你的 {count} 条长期记忆（含候选）。其它会话需分别删除；短期上下文按原保留期过期。"
+        elif text in {"/记忆 开启", "/记忆 关闭"}:
+            enabled = text.endswith("开启")
+            await asyncio.to_thread(memory.preference, event, enabled)
+            reply = (
+                "已开启本会话记忆；仍需管理员启用全局功能并审核条目。"
+                if enabled
+                else "已关闭本会话的记忆候选采集及检索；已保存条目保留，可用 /忘记我 删除。"
+            )
+        elif command == "/记住" and len(text.split(maxsplit=1)) == 2:
+            content = text.split(maxsplit=1)[1]
+            try:
+                result = await asyncio.to_thread(memory.capture, event, content)
+                reply = (
+                    "同一会话已有相同条目，未重复保存；其审核状态保持原样。"
+                    if result["duplicate"]
+                    else "已提取为记忆候选，等待管理员审核。审核通过后仅在本会话使用；可用 /忘记我 删除。"
+                )
+            except ValueError:
+                reply = "未保存记忆。请确认记忆功能已启用、本会话未关闭，内容为 1–1000 字，且待审核候选未满 50 条。"
+        else:
+            reply = "记忆命令：/记住 内容、/记忆 开启、/记忆 关闭、/忘记我。群聊需 @我；保存候选后由管理员审核。"
+        await self.executor.send(event, reply, "direct")
+        return True
 
     async def admin_command(self, event):
         if not event.text.strip().startswith("/soulbot"):

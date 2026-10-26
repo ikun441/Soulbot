@@ -451,6 +451,12 @@ class RelationshipSettings(Model):
     max_daily_gain: int = Field(default=5, ge=1, le=20)
 
 
+class MemorySettings(Model):
+    enabled: bool = False
+    max_items: int = Field(default=4, ge=1, le=10)
+    max_chars: int = Field(default=1200, ge=200, le=4000)
+
+
 class Settings(Model):
     soulbot: Identity = Field(default_factory=Identity)
     web: Web = Field(default_factory=Web)
@@ -469,6 +475,7 @@ class Settings(Model):
     image_generation: ImageGenerationSettings = Field(default_factory=ImageGenerationSettings)
     emotion: EmotionSettings = Field(default_factory=EmotionSettings)
     relationships: RelationshipSettings = Field(default_factory=RelationshipSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):

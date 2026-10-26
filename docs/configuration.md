@@ -41,3 +41,7 @@ QQ 必须有 Token 才能启用。Token 修改需要重启。密钥不会出现�
 
 ## 云端生图
 `image_generation` 默认关闭，使用独立 `SOULBOT_IMAGE_API_KEY`。可选参数留空/omit 不发送，按服务实际能力选填；每次一张，报价按当前模型/尺寸/质量确认。频率和每日图片额度持久化，费用与其它 Provider 共享。详见 [生图说明](image-generation.md)。
+
+## 长期记忆
+
+`memory.enabled` 默认 false，`max_items` 默认 4、`max_chars` 默认 1200，使用 WebUI 相同 Pydantic Schema 热更新。记忆正文、来源、审核、许可、归档和个人开关仅保存在 SQLite schema v9，不进入配置导出。详见 [长期记忆](memory.md)。

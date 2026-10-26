@@ -372,7 +372,7 @@ def test_schema_six_migration_preserves_admin_session_and_existing_usage(service
         db.execute("DROP TABLE image_usage")
         db.execute("UPDATE metadata SET value='6' WHERE key='schema_version'")
     again = build_services(tmp_path)
-    assert again.auth.valid(token) and again.db.get("schema_version") == "8"
+    assert again.auth.valid(token) and again.db.get("schema_version") == "9"
     with sqlite3.connect(again.db.path) as db:
         assert db.execute("SELECT * FROM admins").fetchone() == admin
         assert db.execute("SELECT id FROM asr_usage").fetchone()[0] == previous

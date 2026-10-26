@@ -37,6 +37,6 @@ WebUI 的“全局情绪”页面显示愉悦度、活跃度、好奇心、社�
 
 QQ Prompt 只读取当前机器人、群/私聊及用户的关系，全局情绪只包含无来源身份的数值与标签；不同群和私聊的称呼不会互相加入 Prompt。WebUI 试聊读取全局情绪，不加载 QQ 个人关系，也不增加好感。模型没有直接修改情绪或好感的工具。
 
-本版交付的是 M3 的关系与情绪基础，长期记忆提取/检索、日记和自主社交仍在后续版本。升级前停止服务并备份 config.yaml、data/ 和 .env；schema v8 数据不能直接交给不支持它的旧版程序。
+M3 的显式候选记忆、审核和作用域检索已在 v0.9.7 接入，详见 [长期记忆说明](memory.md)；日记和自主社交仍在后续阶段。升级前停止服务并备份 config.yaml、data/ 和 .env；schema v8 数据不能直接交给不支持它的旧版程序。
 
 开发验证：`.venv/bin/python -m pytest -q tests/test_social_state.py` 覆盖状态机、时间恢复、事务、隔离、持久限额与 Agent 集成；`node --test tests/web/page-session.test.mjs` 验证页面请求竞态，不需要额外前端依赖。浏览器验收使用独立本地实例与测试账户，不代表真实 QQ/云端 Provider 已验收。
