@@ -388,14 +388,23 @@ class ProactiveScheduler:
             return self.reason(db, row, exclude=key) is None
 
     def finish(self, key, sent, reason=None):
+        confirmed = None
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT status FROM proactive_jobs WHERE id=?", (key,)).fetchone()
+            row = db.execute("SELECT * FROM proactive_jobs WHERE id=?", (key,)).fetchone()
             if row and row["status"] == "running":
                 status = "sent" if sent else "uncertain"
                 self.transition(db, key, status, reason or ("confirmed" if sent else "unconfirmed"))
                 db.execute("UPDATE proactive_usage SET status=? WHERE job_id=?", (status, key))
+                if sent:
+                    confirmed = ChatEvent(row["bot_id"], row["user_id"], key, "")
         self.db.audit("proactive_job_finished", "sent" if sent else "uncertain")
+        diary = getattr(self.s, "diary", None)
+        if confirmed and diary:
+            try:
+                diary.record(confirmed, kind="proactive", source_key=key)
+            except Exception:
+                self.db.audit("diary_capture_failed")
 
     async def tick(self):
         async with self.lock:

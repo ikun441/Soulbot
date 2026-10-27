@@ -451,6 +451,14 @@ class RelationshipSettings(Model):
     max_daily_gain: int = Field(default=5, ge=1, le=20)
 
 
+class DiarySettings(Model):
+    enabled: bool = False
+    auto_generate: bool = True
+    generation_time: str = Field(default="00:30", pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    min_events: int = Field(default=2, ge=1, le=100)
+    fact_retention_days: int = Field(default=90, ge=7, le=365)
+
+
 class ProactiveSettings(Model):
     enabled: bool = False
     evaluation_interval_seconds: int = Field(default=30, ge=5, le=300)
@@ -486,6 +494,7 @@ class Settings(Model):
     relationships: RelationshipSettings = Field(default_factory=RelationshipSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     proactive: ProactiveSettings = Field(default_factory=ProactiveSettings)
+    diary: DiarySettings = Field(default_factory=DiarySettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):

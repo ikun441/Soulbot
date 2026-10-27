@@ -134,6 +134,8 @@ class SoulBotAgent:
             return
         if not await asyncio.to_thread(self.conversation.unseen, event):
             return
+        if await self.diary_command(event):
+            return
         if await self.contact_command(event):
             return
         if await self.memory_command(event):
@@ -319,6 +321,7 @@ class SoulBotAgent:
                 return
             delivered = False
             text_delivered = False
+            media_delivered = False
             if not silent:
                 text_delivered = await self.executor.send(event, result.text, trigger)
                 delivered = text_delivered
@@ -331,21 +334,29 @@ class SoulBotAgent:
                         audio = await asyncio.to_thread(
                             self.services.audio.read, reference.split(":", 1)[1], event.scope
                         )
-                        delivered = (
-                            await self.executor.send_audio(event, audio, trigger) or delivered
-                        )
+                        media_sent = await self.executor.send_audio(event, audio, trigger)
+                        media_delivered = media_sent or media_delivered
+                        delivered = media_sent or delivered
                     else:
                         image = await asyncio.to_thread(
                             read_image, self.services, reference, event.scope
                         )
-                        delivered = (
-                            await self.executor.send_image(event, image, trigger, tool) or delivered
-                        )
+                        media_sent = await self.executor.send_image(event, image, trigger, tool)
+                        media_delivered = media_sent or media_delivered
+                        delivered = media_sent or delivered
                 except (PermissionError, ValueError):
                     await asyncio.to_thread(self.db.audit, "image_send_blocked", tool)
                 except Exception:
                     await asyncio.to_thread(self.db.audit, "image_send_failed", tool)
             if delivered:
+                diary = getattr(self.services, "diary", None)
+                if diary:
+                    try:
+                        await asyncio.to_thread(
+                            diary.record, event, has_text=text_delivered, has_media=media_delivered
+                        )
+                    except Exception:
+                        await asyncio.to_thread(self.db.audit, "diary_capture_failed")
                 if trigger != "proactive":
                     try:
                         if relationships:
@@ -427,6 +438,38 @@ class SoulBotAgent:
                     }
                 )
         raise ProviderError("tool_limit", "模型工具对话已达轮数限制，已停止任务")
+
+    async def diary_command(self, event):
+        text = event.text.strip()
+        head = text.split(maxsplit=1)[0] if text else ""
+        if head not in {"/日记", "/删除日记"}:
+            return False
+        diary = getattr(self.services, "diary", None)
+        if not diary or event.is_bot or event.user_id == event.bot_id:
+            return True
+        if event.group_id and not (event.directed or event.reply_target == "bot"):
+            return True
+        settings = self.config.current
+        access = await asyncio.to_thread(self.decision.access, settings, event)
+        privacy = text in {"/日记 关闭", "/删除日记"}
+        if not access and not privacy:
+            return True
+        if text == "/删除日记":
+            count = await asyncio.to_thread(diary.forget, event)
+            reply = f"已删除本会话的 {count} 篇本地日记及对应活动记录，并暂停后续采集。需要恢复时发送 /日记 开启；其它会话分别管理。"
+        elif text in {"/日记 开启", "/日记 关闭"}:
+            enabled = text.endswith("开启")
+            await asyncio.to_thread(diary.preference, event, enabled)
+            reply = (
+                "已允许本会话记录成功活动计数；还需管理员启用本地日记。不会记录聊天正文或自动公开。"
+                if enabled
+                else "已停止本会话的日记活动采集及新日记生成，已有日记保留；可用 /删除日记 删除。"
+            )
+        else:
+            reply = "日记命令：/日记 开启、/日记 关闭、/删除日记。每个机器人、用户及群/私聊独立，仅保存本地；群聊需 @我。"
+        if access and await asyncio.to_thread(self.decision.claim, settings, event, "direct"):
+            await self.executor.send(event, reply, "direct")
+        return True
 
     async def contact_command(self, event):
         text = event.text.strip()

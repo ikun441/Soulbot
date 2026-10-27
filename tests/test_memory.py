@@ -67,7 +67,7 @@ def test_migrate_v8_preserves_state_and_memory_restart(services):
         db.execute("DROP TABLE memory_preferences")
         db.execute("UPDATE metadata SET value='8' WHERE key='schema_version'")
     reopened = Database(s.db.path)
-    assert reopened.get("schema_version") == "10" and reopened.get("preserved") == "fixture"
+    assert reopened.get("schema_version") == "11" and reopened.get("preserved") == "fixture"
     s.memory = MemoryEngine(s.config, reopened, s.memory.clock)
     row = approve(s, candidate(s))
     again = MemoryEngine(s.config, Database(reopened.path), s.memory.clock)

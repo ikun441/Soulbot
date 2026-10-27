@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 10:
+            if version > 11:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -228,5 +228,33 @@ class Database:
                         reason TEXT NOT NULL, created_at REAL NOT NULL);
                     CREATE INDEX IF NOT EXISTS proactive_job_history ON proactive_job_events(job_id,id);
                     UPDATE metadata SET value='10' WHERE key='schema_version';
+                    COMMIT;
+                """)
+            if version < 11:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS diary_events (
+                        id TEXT PRIMARY KEY, scope TEXT NOT NULL, bot_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL, group_id TEXT NOT NULL DEFAULT '',
+                        kind TEXT NOT NULL CHECK(kind IN ('chat','proactive')),
+                        has_text INTEGER NOT NULL, has_media INTEGER NOT NULL,
+                        occurred_at REAL NOT NULL);
+                    CREATE INDEX IF NOT EXISTS diary_events_day ON diary_events(occurred_at,scope);
+                    CREATE TABLE IF NOT EXISTS diary_preferences (
+                        scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+                    CREATE TABLE IF NOT EXISTS diaries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, bot_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL, group_id TEXT NOT NULL DEFAULT '',
+                        day TEXT NOT NULL, timezone TEXT NOT NULL,
+                        starts_at REAL NOT NULL, ends_at REAL NOT NULL,
+                        title TEXT NOT NULL, facts_json TEXT NOT NULL, role_text TEXT NOT NULL,
+                        role_source TEXT NOT NULL, created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE(scope,day));
+                    CREATE INDEX IF NOT EXISTS diaries_day ON diaries(day,id);
+                    CREATE TABLE IF NOT EXISTS diary_runs (
+                        day TEXT PRIMARY KEY, timezone TEXT NOT NULL, completed_at REAL NOT NULL,
+                        created_count INTEGER NOT NULL, skipped_scopes INTEGER NOT NULL);
+                    UPDATE metadata SET value='11' WHERE key='schema_version';
                     COMMIT;
                 """)

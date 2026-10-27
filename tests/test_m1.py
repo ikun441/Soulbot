@@ -232,7 +232,7 @@ def test_database_migrates_old_schema_without_losing_metadata(tmp_path):
     db = Database(tmp_path / "data" / "soulbot.db")
     db.set("wizard_step", "5")
     reopened = Database(tmp_path / "data" / "soulbot.db")
-    assert reopened.get("schema_version") == "10"
+    assert reopened.get("schema_version") == "11"
     assert reopened.get("wizard_step") == "5"
     with reopened.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 0

@@ -22,7 +22,7 @@ def main():
         server = create_runtime(services)
         settings = services.running_config
         host = "127.0.0.1" if settings.web.host == "0.0.0.0" else settings.web.host
-        print(f"SoulBot {VERSION} · M4 授权与主动联系", flush=True)
+        print(f"SoulBot {VERSION} · M4 本地日记与调度", flush=True)
         print(f"WebUI：http://{host}:{settings.web.port}  |  Ctrl+C 停止", flush=True)
         print("人格与情绪属于程序模拟。配置模型和 NapCat 后即可进行文本聊天。", flush=True)
         server.run()

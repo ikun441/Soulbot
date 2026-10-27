@@ -1,6 +1,6 @@
 # SoulBot
 
-**当前版本 v0.9.8 · M4 授权与调度基础**
+**当前版本 v0.9.9 · M4 本地日记基础**
 
 具备可配置人格、模拟情绪、长期记忆与明确行为边界的 AI QQ 机器人平台。当前交付基础服务、QQ 文本消息处理、OpenAI 兼容 LLM 与原生 WebUI。人格和情绪均为软件模拟，不代表真实意识或主观情感。
 
@@ -46,7 +46,7 @@ Windows 双击 `start.cmd`。打开 <http://127.0.0.1:2526>，按向导创建管
 
 ## 开发边界
 
-NapCat、模型服务和密钥需用户自行配置。三个额外仓库已实际加载，共验证 857 个组合模板；HTML 卡片、Edge TTS 与本地 Whisper 已有真实 API 验证。兼容语音/识别、云端生图及真实 QQ 端到端仍待相应凭据和登录设备，M2 尚未整体验收。M3 已交付好感度、连续模拟情绪和显式候选长期记忆，支持审核、去重、会话隔离检索及个人关闭/删除；语义提取与向量检索后续扩展；M4 已提供用户授权及审批后的固定文本主动私聊，默认关闭；自主主题与日记继续开发，QQ 空间在 M5。详见 [多模态说明](docs/multimodal.md)、[卡片说明](docs/html-render.md)、[语音说明](docs/tts.md)、[识别说明](docs/asr.md)、[云端生图说明](docs/image-generation.md) 、[记忆说明](docs/memory.md)、[主动联系说明](docs/proactive.md) 和 [进度与下一版计划](docs/progress.md)。
+NapCat、模型服务和密钥需用户自行配置。三个额外仓库已实际加载，共验证 857 个组合模板；HTML 卡片、Edge TTS 与本地 Whisper 已有真实 API 验证。兼容语音/识别、云端生图及真实 QQ 端到端仍待相应凭据和登录设备，M2 尚未整体验收。M3 已交付好感度、连续模拟情绪和显式候选长期记忆，支持审核、去重、会话隔离检索及个人关闭/删除；语义提取与向量检索后续扩展；M4 已提供用户授权及审批后的固定文本主动私聊，默认关闭；本地日记已提供隔离事实及角色表达管理，自主主题与周记继续开发，QQ 空间在 M5。详见 [多模态说明](docs/multimodal.md)、[卡片说明](docs/html-render.md)、[语音说明](docs/tts.md)、[识别说明](docs/asr.md)、[云端生图说明](docs/image-generation.md) 、[记忆说明](docs/memory.md)、[主动联系说明](docs/proactive.md)、[日记说明](docs/diary.md) 和 [进度与下一版计划](docs/progress.md)。
 
 ```bash
 .venv/bin/python -m pip install -r requirements-dev.txt

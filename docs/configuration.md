@@ -49,3 +49,7 @@ QQ 必须有 Token 才能启用。Token 修改需要重启。密钥不会出现�
 ## 主动联系与调度
 
 `proactive.enabled` 默认 false。检查间隔、每日次数、冷却和随机延迟由共享 Schema 热更新；用户授权、任务、审批及预留保存在 schema v10。管理端不能代替 QQ 私聊授权。详见 [主动联系](proactive.md)。
+
+## 本地日记
+
+`diary.enabled` 默认 false，`auto_generate` 默认 true，生成时间 00:30，最低事件数 2，活动保留 90 天。使用共享 Pydantic Schema 热更新，记录和偏好存在 SQLite schema v11；不进入配置导出，也无发送入口。详见 [本地日记](diary.md)。

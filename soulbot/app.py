@@ -38,6 +38,7 @@ from soulbot.services.audio_service import AudioStore
 from soulbot.services.auth_service import AccountChange, AuthService
 from soulbot.services.auth_service import AdminAccount as Account
 from soulbot.services.config_service import ConfigService, Model, Settings
+from soulbot.services.diary_service import DiaryService
 from soulbot.services.environment_service import EnvironmentError, EnvironmentService
 from soulbot.services.image_service import ImageGenerationService
 from soulbot.services.llm_service import LLMService
@@ -105,6 +106,7 @@ class Services:
     memory: MemoryEngine | None = None
     consent: ConsentStore | None = None
     scheduler: ProactiveScheduler | None = None
+    diary: DiaryService | None = None
 
 
 def build_services(root):
@@ -132,6 +134,7 @@ def build_services(root):
     services.relationships = RelationshipEngine(config, db)
     services.memory = MemoryEngine(config, db)
     services.consent = ConsentStore(config, db)
+    services.diary = DiaryService(config, db)
     services.diagnostics = ProviderDiagnostics()
     services.llm = LLMService(
         config,
@@ -196,9 +199,11 @@ def create_web_app(root: Path, services=None):
     async def lifespan(application):
         await s.meme.startup()
         await s.scheduler.startup()
+        await s.diary.startup()
         try:
             yield
         finally:
+            await s.diary.close()
             await s.scheduler.close()
             await s.meme.close()
             await s.agent.close()
@@ -477,7 +482,7 @@ def create_web_app(root: Path, services=None):
             "usage": s.budget.summary(s.config.current),
             "meme_generator": s.meme.status(),
             "restart_required": restart_required(),
-            "stage": "M4 · 授权与主动联系",
+            "stage": "M4 · 本地日记与调度",
             "emotion": s.emotion.snapshot(),
         }
 
@@ -565,6 +570,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.proactive import install_proactive_api
 
     install_proactive_api(app, s, authorized)
+    from soulbot.web.api.diary import install_diary_api
+
+    install_diary_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():
