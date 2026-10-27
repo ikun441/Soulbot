@@ -24,10 +24,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from soulbot import VERSION
 from soulbot.core.agent import SoulBotAgent
 from soulbot.core.budget import BudgetService
+from soulbot.core.consent import ConsentStore
 from soulbot.core.emotion import EmotionEngine
 from soulbot.core.memory import MemoryEngine
 from soulbot.core.permissions import PermissionEngine
 from soulbot.core.relationship import RelationshipEngine
+from soulbot.core.scheduler import ProactiveScheduler
 from soulbot.core.social_state import StateConflict
 from soulbot.providers.llm.base import ProviderError
 from soulbot.providers.registry import ProviderRegistry
@@ -101,6 +103,8 @@ class Services:
     emotion: EmotionEngine | None = None
     relationships: RelationshipEngine | None = None
     memory: MemoryEngine | None = None
+    consent: ConsentStore | None = None
+    scheduler: ProactiveScheduler | None = None
 
 
 def build_services(root):
@@ -127,6 +131,7 @@ def build_services(root):
     services.emotion = EmotionEngine(config, db)
     services.relationships = RelationshipEngine(config, db)
     services.memory = MemoryEngine(config, db)
+    services.consent = ConsentStore(config, db)
     services.diagnostics = ProviderDiagnostics()
     services.llm = LLMService(
         config,
@@ -163,6 +168,8 @@ def build_services(root):
     services.providers.register("html_render", "chromium", services.renderer, default=True)
     register_media_tools(services)
     services.agent = SoulBotAgent(config, db, services.llm, services)
+    services.scheduler = ProactiveScheduler(services)
+    services.agent.executor.proactive_guard = services.scheduler.allowed_event
     with db.connect() as connection:
         connection.execute(
             "UPDATE llm_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
@@ -188,9 +195,11 @@ def create_web_app(root: Path, services=None):
     @asynccontextmanager
     async def lifespan(application):
         await s.meme.startup()
+        await s.scheduler.startup()
         try:
             yield
         finally:
+            await s.scheduler.close()
             await s.meme.close()
             await s.agent.close()
             await s.speech.close()
@@ -468,7 +477,7 @@ def create_web_app(root: Path, services=None):
             "usage": s.budget.summary(s.config.current),
             "meme_generator": s.meme.status(),
             "restart_required": restart_required(),
-            "stage": "M3 · 人格与长期记忆",
+            "stage": "M4 · 授权与主动联系",
             "emotion": s.emotion.snapshot(),
         }
 
@@ -553,6 +562,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.memory import install_memory_api
 
     install_memory_api(app, s, authorized)
+    from soulbot.web.api.proactive import install_proactive_api
+
+    install_proactive_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

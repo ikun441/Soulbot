@@ -187,6 +187,7 @@ def create_runtime(services):
     nonebot.get_app().mount("/", web)
 
     async def shutdown():
+        await services.scheduler.close()
         await services.meme.close()
         await services.agent.close()
         await services.speech.close()
@@ -196,6 +197,7 @@ def create_runtime(services):
 
     driver.on_shutdown(shutdown)
     driver.on_startup(services.meme.startup)
+    driver.on_startup(services.scheduler.startup)
     import uvicorn
 
     config = uvicorn.Config(

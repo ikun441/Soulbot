@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 9:
+            if version > 10:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -196,5 +196,37 @@ class Database:
                     CREATE TABLE IF NOT EXISTS memory_preferences (
                         scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
                     UPDATE metadata SET value='9' WHERE key='schema_version';
+                    COMMIT;
+                """)
+            if version < 10:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS proactive_contacts (
+                        id INTEGER PRIMARY KEY, bot_id TEXT NOT NULL, user_id TEXT NOT NULL,
+                        opted_in INTEGER NOT NULL DEFAULT 0, user_paused INTEGER NOT NULL DEFAULT 0,
+                        admin_blocked INTEGER NOT NULL DEFAULT 0,
+                        quiet_start TEXT NOT NULL DEFAULT '00:00', quiet_end TEXT NOT NULL DEFAULT '08:00',
+                        authorized_at REAL, revoked_at REAL, updated_at REAL NOT NULL,
+                        revision INTEGER NOT NULL DEFAULT 0, UNIQUE(bot_id,user_id));
+                    CREATE TABLE IF NOT EXISTS proactive_jobs (
+                        id TEXT PRIMARY KEY, request_id TEXT UNIQUE NOT NULL, fingerprint TEXT NOT NULL,
+                        bot_id TEXT NOT NULL, user_id TEXT NOT NULL, content TEXT NOT NULL,
+                        earliest_at REAL NOT NULL, latest_at REAL NOT NULL, run_at REAL NOT NULL,
+                        status TEXT NOT NULL, reason TEXT NOT NULL, created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL, reviewed_at REAL, approved_by INTEGER,
+                        next_check_at REAL NOT NULL DEFAULT 0, lease_until REAL,
+                        revision INTEGER NOT NULL DEFAULT 0);
+                    CREATE INDEX IF NOT EXISTS proactive_jobs_due
+                        ON proactive_jobs(status,next_check_at,run_at);
+                    CREATE TABLE IF NOT EXISTS proactive_usage (
+                        job_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, user_id TEXT NOT NULL,
+                        day TEXT NOT NULL, created_at REAL NOT NULL, status TEXT NOT NULL);
+                    CREATE INDEX IF NOT EXISTS proactive_usage_scope
+                        ON proactive_usage(bot_id,user_id,day,created_at);
+                    CREATE TABLE IF NOT EXISTS proactive_job_events (
+                        id INTEGER PRIMARY KEY, job_id TEXT NOT NULL, status TEXT NOT NULL,
+                        reason TEXT NOT NULL, created_at REAL NOT NULL);
+                    CREATE INDEX IF NOT EXISTS proactive_job_history ON proactive_job_events(job_id,id);
+                    UPDATE metadata SET value='10' WHERE key='schema_version';
                     COMMIT;
                 """)

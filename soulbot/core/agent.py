@@ -15,6 +15,7 @@ class ActionExecutor:
     def __init__(self, config, decision, audit):
         self.config, self.decision, self.audit = config, decision, audit
         self.sender = None
+        self.proactive_guard = None
         self.lock = asyncio.Lock()
         self.permissions = PermissionEngine(
             {
@@ -88,6 +89,9 @@ class ActionExecutor:
         settings = self.config.current
         if not await asyncio.to_thread(self.decision.access, settings, event):
             return False
+        if trigger == "scheduled_private":
+            if not self.proactive_guard or not await asyncio.to_thread(self.proactive_guard, event):
+                return False
         if event.group_id and trigger != "admin":
             state = await asyncio.to_thread(self.decision.state, event)
             if (
@@ -129,6 +133,8 @@ class SoulBotAgent:
         if self.closed:
             return
         if not await asyncio.to_thread(self.conversation.unseen, event):
+            return
+        if await self.contact_command(event):
             return
         if await self.memory_command(event):
             return
@@ -421,6 +427,42 @@ class SoulBotAgent:
                     }
                 )
         raise ProviderError("tool_limit", "模型工具对话已达轮数限制，已停止任务")
+
+    async def contact_command(self, event):
+        text = event.text.strip()
+        head = text.split(maxsplit=1)[0] if text else ""
+        if head not in {"/主动联系", "/免打扰"}:
+            return False
+        consent = getattr(self.services, "consent", None)
+        if not consent or event.group_id or event.is_bot or event.user_id == event.bot_id:
+            return True
+        settings = self.config.current
+        privacy = text in {"/主动联系 禁止", "/免打扰 开启"}
+        access = await asyncio.to_thread(self.decision.access, settings, event)
+        if not access and not privacy:
+            return True
+        if text in {"/主动联系 允许", "/主动联系 禁止"}:
+            enabled = text.endswith("允许")
+            await asyncio.to_thread(consent.set_user, event, consent=enabled)
+            reply = (
+                "已允许这个机器人主动私聊你。仍需管理员启用功能、审批草稿，且受免打扰、每日次数和费用限制。随时发送 /主动联系 禁止 撤销。"
+                if enabled
+                else "已撤销主动联系授权，并取消尚未执行的任务。正在发送的消息可能无法撤回。"
+            )
+        elif text in {"/免打扰 开启", "/免打扰 关闭"}:
+            paused = text.endswith("开启")
+            await asyncio.to_thread(consent.set_user, event, paused=paused)
+            reply = (
+                "已开启主动联系免打扰。普通私聊回复不受影响。"
+                if paused
+                else "已关闭主动联系免打扰；夜间时段、用户授权和其它限制仍生效。"
+            )
+        else:
+            reply = "主动私聊命令：/主动联系 允许、/主动联系 禁止、/免打扰 开启、/免打扰 关闭。授权仅对当前机器人生效，默认不允许主动联系。"
+        # Persist withdrawal immediately, even when reply cooldown suppresses the acknowledgement.
+        if access and await asyncio.to_thread(self.decision.claim, settings, event, "direct"):
+            await self.executor.send(event, reply, "direct")
+        return True
 
     async def memory_command(self, event):
         text = event.text.strip()

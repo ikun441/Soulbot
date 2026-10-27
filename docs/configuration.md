@@ -45,3 +45,7 @@ QQ 必须有 Token 才能启用。Token 修改需要重启。密钥不会出现�
 ## 长期记忆
 
 `memory.enabled` 默认 false，`max_items` 默认 4、`max_chars` 默认 1200，使用 WebUI 相同 Pydantic Schema 热更新。记忆正文、来源、审核、许可、归档和个人开关仅保存在 SQLite schema v9，不进入配置导出。详见 [长期记忆](memory.md)。
+
+## 主动联系与调度
+
+`proactive.enabled` 默认 false。检查间隔、每日次数、冷却和随机延迟由共享 Schema 热更新；用户授权、任务、审批及预留保存在 schema v10。管理端不能代替 QQ 私聊授权。详见 [主动联系](proactive.md)。
