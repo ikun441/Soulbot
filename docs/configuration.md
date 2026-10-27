@@ -16,7 +16,7 @@
 | limits | 每次输入/输出、每个 Agent 任务总 Token；工具 Schema 和所有模型轮次均计入 |
 | emoji | enabled、directory（固定 ./emoji）、recursive、max_candidates、browse_enabled、max_files、max_filename_chars |
 | meme | enabled（默认 false）、managed、auto_install、version（固定0.1.14）、base_url、timeout_seconds、max_restarts |
-| tools | 媒体工具的 deny/auto/approval；当前 approval 会拒绝，审批队列尚未开放 |
+| tools | 媒体工具的 deny/auto/approval；当前 approval 会拒绝，媒体工具审批尚未开放（主动私聊和空间草稿使用独立审批流程） |
 | html_render | enabled（默认 false）、width（480—1200）、max_height（400—2400）、timeout_seconds（5—60）；浏览器由卡片工坊明确准备 |
 
 未知字段、无效端口/时区/非有限费用、非受支持的壁纸路径均被拒绝。失败不会覆盖现有文件。每次保存自动备份上一版至 data/config.backup.yaml；恢复操作会交换当前与备份版本。
@@ -25,7 +25,7 @@
 
 WebUI 账号使用 `.env` 中的 `SOULBOT_WEBUI_USERNAME`、`SOULBOT_WEBUI_PASSWORD_HASH`；可填 `SOULBOT_WEBUI_PASSWORD` 作为启动时输入，随后自动转换并删除明文。反向地址使用 `SOULBOT_ONEBOT_REVERSE_WS_URL`，优先级为进程环境 → .env → YAML。创建/修改账号和编辑反向地址均可通过 WebUI 完成；更改账号立即生效，接收路径需重启。参见 [.env 配置说明](environment.md)。
 
-QQ 必须有 Token 才能启用。Token 修改需要重启。密钥不会出现在 YAML、GET 配置或导出中。导出还会清空主人 QQ，但不自动审查用户填写的 Prompt，请自行检查。
+非本机 QQ 接入必须设置 Token；仅回环监听与本机连接可以无 Token。Token 修改需要重启。密钥不会出现在 YAML、GET 配置或导出中。导出还会清空主人 QQ，但不自动审查用户填写的 Prompt，请自行检查。
 
 备份/数据库均为私密文件。完整备份应停止程序并复制 config.yaml、data 和实际 .env，详见 start.md。
 
@@ -52,4 +52,8 @@ QQ 必须有 Token 才能启用。Token 修改需要重启。密钥不会出现�
 
 ## 本地日记
 
-`diary.enabled` 默认 false，`auto_generate` 默认 true，生成时间 00:30，最低事件数 2，活动保留 90 天。使用共享 Pydantic Schema 热更新，记录和偏好存在 SQLite schema v11；不进入配置导出，也无发送入口。详见 [本地日记](diary.md)。
+`diary.enabled` 默认 false，`auto_generate` 默认 true，生成时间 00:30，最低事件数 2，活动保留 90 天。使用共享 Pydantic Schema 热更新，live_preview 默认 true，显示当天进行中记录；记录和偏好存在 SQLite schema v13；不进入配置导出，也无发送入口。详见 [本地日记](diary.md)。
+
+## QQ 空间（v2.0.0）
+
+根节点 `qzone.enabled` 默认 false，`min_interval_hours` 默认 72（范围 72—8760），`max_posts_per_week` 默认 2（范围 1—2）。规则热更新，所有机器人共享滚动限额。`require_approval` 默认 true，可显式关闭。`autonomous_enabled` 默认 false，启用时必须关闭逐条审批并填写 `auto_bot_id`；`auto_audience` 选择 friends/self/public，`auto_topics` 为 1—20 个公开主题（每项 1—100 字）。旧 `behavior.qzone` 继续保留 false。详见 [空间草稿与审批](qzone.md)。

@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 11:
+            if version > 13:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -258,3 +258,55 @@ class Database:
                     UPDATE metadata SET value='11' WHERE key='schema_version';
                     COMMIT;
                 """)
+
+            if version < 12:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS qzone_drafts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        request_id TEXT UNIQUE NOT NULL, input_hash TEXT NOT NULL,
+                        bot_id TEXT NOT NULL, content TEXT NOT NULL, audience TEXT NOT NULL,
+                        source TEXT NOT NULL, status TEXT NOT NULL, reason TEXT NOT NULL,
+                        created_at REAL NOT NULL, updated_at REAL NOT NULL,
+                        revision INTEGER NOT NULL DEFAULT 0,
+                        approved_hash TEXT, approved_owner TEXT, approved_at REAL,
+                        lease_until REAL, tid TEXT);
+                    CREATE INDEX IF NOT EXISTS qzone_drafts_status ON qzone_drafts(status,id);
+                    CREATE TABLE IF NOT EXISTS qzone_attempts (
+                        draft_id INTEGER PRIMARY KEY, bot_id TEXT NOT NULL,
+                        created_at REAL NOT NULL, status TEXT NOT NULL);
+                    CREATE INDEX IF NOT EXISTS qzone_attempts_time ON qzone_attempts(created_at);
+                    CREATE TABLE IF NOT EXISTS qzone_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, draft_id INTEGER NOT NULL,
+                        status TEXT NOT NULL, reason TEXT NOT NULL, created_at REAL NOT NULL);
+                    UPDATE metadata SET value='12' WHERE key='schema_version';
+                    COMMIT;
+                """)
+
+            if version < 13:
+                final_column = (
+                    ""
+                    if "is_final" in {r[1] for r in db.execute("PRAGMA table_info(diaries)")}
+                    else "ALTER TABLE diaries ADD COLUMN is_final INTEGER NOT NULL DEFAULT 1;"
+                )
+                db.executescript(
+                    """
+                    BEGIN IMMEDIATE;
+                    ALTER TABLE diary_events RENAME TO diary_events_old;
+                    CREATE TABLE diary_events (
+                        id TEXT PRIMARY KEY, scope TEXT NOT NULL, bot_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL, group_id TEXT NOT NULL DEFAULT '',
+                        kind TEXT NOT NULL CHECK(kind IN ('chat','proactive','qzone')),
+                        has_text INTEGER NOT NULL, has_media INTEGER NOT NULL,
+                        occurred_at REAL NOT NULL);
+                    INSERT INTO diary_events SELECT * FROM diary_events_old;
+                    DROP TABLE diary_events_old;
+                    CREATE INDEX diary_events_day ON diary_events(occurred_at,scope);
+                """
+                    + final_column
+                    + """
+                    CREATE TABLE IF NOT EXISTS diary_qzone_seen (draft_id INTEGER PRIMARY KEY, captured_at REAL NOT NULL);
+                    UPDATE metadata SET value='13' WHERE key='schema_version';
+                    COMMIT;
+                """
+                )

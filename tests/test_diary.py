@@ -32,6 +32,7 @@ def services(tmp_path):
     s.now = [stamp("2026-10-26")]
     s.diary.clock = s.scheduler.clock = s.consent.clock = lambda: s.now[0]
     s.config.current.diary.enabled = True
+    s.config.current.diary.live_preview = False
     s.config.current.diary.auto_generate = False
     return s
 
@@ -70,7 +71,7 @@ def test_schema_ten_migration_preserves_data_and_is_idempotent(services):
             db.execute("DROP TABLE " + table)
         db.execute("UPDATE metadata SET value='10' WHERE key='schema_version'")
     db = Database(s.db.path)
-    assert db.get("schema_version") == "11" and db.get("preserved") == "fixture"
+    assert db.get("schema_version") == "13" and db.get("preserved") == "fixture"
     Database(db.path)
     facts(s)
     end_day(s)
@@ -419,3 +420,115 @@ def test_deleted_diary_id_cannot_target_another_persons_new_entry(services):
     with pytest.raises(LookupError):
         s.diary.delete(old["id"], old["revision"])
     assert s.diary.get(new["id"])["facts"]["total"] == 2
+
+
+def test_today_preview_refresh_preserves_manual_expression_and_finalizes(services):
+    s = services
+    s.config.current.diary.live_preview = True
+    facts(s)
+    row = s.diary.listing()["items"][0]
+    assert not row["is_final"] and row["facts"]["total"] == 2
+    edited = s.diary.edit(
+        row["id"],
+        DiaryEdit(revision=row["revision"], title="手动标题", role_text="手动整理的角色表达"),
+    )
+    facts(s, count=1)
+    current = s.diary.listing()["items"][0]
+    assert current["facts"]["total"] == 3 and current["revision"] > edited["revision"]
+    assert current["role_text"] == "手动整理的角色表达" and current["title"] == "手动标题"
+    unchanged = s.diary.listing()["items"][0]
+    assert unchanged["revision"] == current["revision"]
+    end_day(s)
+    result = s.diary.generate("2026-10-26")
+    assert result["updated"] == 1
+    final = s.diary.get(row["id"])
+    assert final["is_final"] and final["role_text"] == "手动整理的角色表达"
+
+
+def test_today_preview_respects_threshold_opt_out_and_empty_days(services):
+    s = services
+    s.config.current.diary.live_preview = True
+    assert s.diary.listing()["items"] == []
+    facts(s, count=1)
+    assert s.diary.listing()["items"] == []
+    s.diary.preference(event(), False)
+    facts(s, count=3)
+    assert s.diary.listing()["items"] == []
+
+
+def qzone_fact(s, status="published"):
+    from soulbot.services.qzone_service import DraftCreate
+
+    row = asyncio.run(
+        s.qzone.create(
+            DraftCreate(
+                request_id=uuid4(),
+                bot_id="34567",
+                content="fixture body must not be copied to diary",
+            )
+        )
+    )
+    with s.db.connect() as db:
+        db.execute(
+            "UPDATE qzone_drafts SET status=?,tid=?,updated_at=? WHERE id=?",
+            (status, "fixture_tid" if status == "published" else None, s.now[0], row["id"]),
+        )
+    return row
+
+
+def test_confirmed_qzone_activity_appears_today_without_body_and_deleted_not_reimported(services):
+    s = services
+    s.config.current.diary.live_preview = True
+    s.config.current.diary.min_events = 1
+    qzone_fact(s)
+    qzone_fact(s, "uncertain")
+    status = s.diary.status()
+    assert status["today_events"] == 1
+    row = s.diary.listing()["items"][0]
+    assert row["visibility"] == "bot_activity" and not row["is_final"]
+    assert row["facts"]["qzone_posts"] == 1 and row["facts"]["chat_replies"] == 0
+    assert "fixture body" not in json.dumps(row)
+    assert "1 次" in row["role_text"]
+    s.diary.status()
+    assert s.diary.status()["today_events"] == 1
+    s.diary.delete(row["id"], row["revision"])
+    assert s.diary.listing()["total"] == 0 and s.diary.status()["today_events"] == 0
+
+
+def test_diary_disabled_does_not_import_qzone_activity(services):
+    s = services
+    s.config.current.diary.enabled = False
+    qzone_fact(s)
+    assert s.diary.status()["today_events"] == 0
+    with s.db.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM diary_qzone_seen").fetchone()[0] == 0
+
+
+def test_current_day_api_explicit_flag_and_live_preview_off_manual_refresh(services):
+    s = services
+    facts(s)
+    assert s.diary.listing()["total"] == 0
+    with pytest.raises(ValueError):
+        s.diary.generate("2026-10-26")
+    row = s.diary.generate("2026-10-26", include_current_day=True)
+    assert row["created"] == 1 and not row["is_final"]
+    with pytest.raises(ValueError):
+        s.diary.generate("2026-10-27", include_current_day=True)
+
+
+def test_schema_twelve_migration_preserves_events_and_diaries(services):
+    s = services
+    facts(s)
+    end_day(s)
+    old = diary(s)
+    with s.db.connect() as db:
+        db.execute("ALTER TABLE diaries DROP COLUMN is_final")
+        db.execute("DROP TABLE diary_qzone_seen")
+        db.execute("UPDATE metadata SET value='12' WHERE key='schema_version'")
+    upgraded = Database(s.db.path)
+    assert upgraded.get("schema_version") == "13"
+    assert s.diary.get(old["id"])["is_final"]
+    assert s.diary.get(old["id"])["role_text"] == old["role_text"]
+    with upgraded.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM diary_events").fetchone()[0] == 2
+    Database(s.db.path)

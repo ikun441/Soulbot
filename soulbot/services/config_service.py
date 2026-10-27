@@ -451,8 +451,37 @@ class RelationshipSettings(Model):
     max_daily_gain: int = Field(default=5, ge=1, le=20)
 
 
+class QZoneSettings(Model):
+    enabled: bool = False
+    min_interval_hours: int = Field(default=72, ge=72, le=8760)
+    max_posts_per_week: int = Field(default=2, ge=1, le=2)
+    require_approval: bool = True
+    autonomous_enabled: bool = False
+    auto_bot_id: str = Field(default="", pattern=r"^([1-9][0-9]{4,11})?$")
+    auto_audience: Literal["friends", "self", "public"] = "friends"
+    auto_topics: list[str] = Field(
+        default_factory=lambda: ["阳光与好心情", "音乐与平凡生活里的小美好"],
+        min_length=1,
+        max_length=20,
+    )
+
+    @field_validator("auto_topics")
+    @classmethod
+    def public_topics(cls, values):
+        if any(not v.strip() or len(v) > 100 or any(ord(c) < 32 for c in v) for v in values):
+            raise ValueError("每个公开主题须为 1—100 个正常字符")
+        return list(dict.fromkeys(v.strip() for v in values))
+
+    @model_validator(mode="after")
+    def auto_policy(self):
+        if self.autonomous_enabled and (self.require_approval or not self.auto_bot_id):
+            raise ValueError("自主发布需要关闭逐条审批，并填写自动发布机器人 QQ")
+        return self
+
+
 class DiarySettings(Model):
     enabled: bool = False
+    live_preview: bool = True
     auto_generate: bool = True
     generation_time: str = Field(default="00:30", pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
     min_events: int = Field(default=2, ge=1, le=100)
@@ -495,6 +524,7 @@ class Settings(Model):
     memory: MemorySettings = Field(default_factory=MemorySettings)
     proactive: ProactiveSettings = Field(default_factory=ProactiveSettings)
     diary: DiarySettings = Field(default_factory=DiarySettings)
+    qzone: QZoneSettings = Field(default_factory=QZoneSettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):

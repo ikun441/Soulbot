@@ -1,2 +1,2 @@
-__version__ = "0.9.9"
+__version__ = "2.0.0"
 VERSION = f"v{__version__}"

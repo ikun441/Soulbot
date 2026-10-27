@@ -16,6 +16,7 @@ from nonebot.adapters.onebot.v11 import (
     MessageSegment,
 )
 
+from soulbot.adapters.qzone import probe_qzone
 from soulbot.app import create_web_app
 from soulbot.core.events import ChatEvent
 from soulbot.services.audio_service import MAX_AUDIO_BYTES, AudioPayload
@@ -49,6 +50,15 @@ def normalize(event: MessageEvent, known_bot_ids=()):
 
 
 class NoneBotTransport:
+    async def qzone_capability(self, bot_id):
+        return await probe_qzone(nonebot.get_bot(bot_id), bot_id)
+
+    async def qzone_publish(self, bot_id, content, ugc_right, connection, guard):
+        bot = nonebot.get_bot(bot_id)
+        if bot is not connection or not guard():
+            raise ValueError("空间发布连接或审批已失效")
+        return await bot.call_api("send_qzone_msg", content=content, images=[], ugc_right=ugc_right)
+
     async def fetch_record(self, event):
         # Current NapCat emits an opaque UUID. Never send arbitrary URLs/paths to it.
         if not event.record_file or not re.fullmatch(
@@ -187,6 +197,7 @@ def create_runtime(services):
     nonebot.get_app().mount("/", web)
 
     async def shutdown():
+        await services.qzone.close()
         await services.diary.close()
         await services.scheduler.close()
         await services.meme.close()
@@ -200,6 +211,7 @@ def create_runtime(services):
     driver.on_startup(services.meme.startup)
     driver.on_startup(services.scheduler.startup)
     driver.on_startup(services.diary.startup)
+    driver.on_startup(services.qzone.startup)
     import uvicorn
 
     config = uvicorn.Config(

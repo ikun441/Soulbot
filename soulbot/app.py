@@ -45,6 +45,7 @@ from soulbot.services.llm_service import LLMService
 from soulbot.services.media_service import MediaError, MediaStore
 from soulbot.services.meme_service import MemeService
 from soulbot.services.provider_diagnostics import ProviderDiagnostics
+from soulbot.services.qzone_service import QZoneService
 from soulbot.services.render_service import HTMLRenderService
 from soulbot.services.secret_service import SecretService
 from soulbot.services.tts_service import TTSService
@@ -107,6 +108,7 @@ class Services:
     consent: ConsentStore | None = None
     scheduler: ProactiveScheduler | None = None
     diary: DiaryService | None = None
+    qzone: QZoneService | None = None
 
 
 def build_services(root):
@@ -135,6 +137,7 @@ def build_services(root):
     services.memory = MemoryEngine(config, db)
     services.consent = ConsentStore(config, db)
     services.diary = DiaryService(config, db)
+    services.qzone = QZoneService(services)
     services.diagnostics = ProviderDiagnostics()
     services.llm = LLMService(
         config,
@@ -200,9 +203,11 @@ def create_web_app(root: Path, services=None):
         await s.meme.startup()
         await s.scheduler.startup()
         await s.diary.startup()
+        await s.qzone.startup()
         try:
             yield
         finally:
+            await s.qzone.close()
             await s.diary.close()
             await s.scheduler.close()
             await s.meme.close()
@@ -482,7 +487,7 @@ def create_web_app(root: Path, services=None):
             "usage": s.budget.summary(s.config.current),
             "meme_generator": s.meme.status(),
             "restart_required": restart_required(),
-            "stage": "M4 · 本地日记与调度",
+            "stage": "M5 · 空间草稿与自主发布",
             "emotion": s.emotion.snapshot(),
         }
 
@@ -573,6 +578,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.diary import install_diary_api
 
     install_diary_api(app, s, authorized)
+    from soulbot.web.api.qzone import install_qzone_api
+
+    install_qzone_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

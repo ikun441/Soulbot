@@ -16,3 +16,5 @@
 .proactive-job{border:1px solid var(--line);border-radius:16px;padding:18px;margin:14px 0;background:#ffffff55}.proactive-content{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.8}.proactive-job h3{overflow-wrap:anywhere}.proactive-job .section-title{flex-wrap:wrap}
 
 #confirm-text{white-space:pre-wrap;overflow-wrap:anywhere}
+
+#qzone-events{max-width:none;white-space:pre-wrap;overflow-wrap:anywhere}

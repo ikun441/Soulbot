@@ -15,6 +15,7 @@ from soulbot.services.config_service import Model
 
 
 class GenerateDiary(Model):
+    include_current_day: bool = False
     day: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
 
     @field_validator("day")
@@ -113,14 +114,57 @@ class DiaryService:
         self.db.audit("diary_forgotten")
         return count
 
+    def capture_qzone(self):
+        if not self.config.current.diary.enabled:
+            return
+        cutoff = self.clock() - self.config.current.diary.fact_retention_days * 86400
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for row in db.execute(
+                "SELECT id,bot_id,updated_at FROM qzone_drafts WHERE status='published' AND tid IS NOT NULL AND updated_at>=? AND id NOT IN (SELECT draft_id FROM diary_qzone_seen)",
+                (cutoff,),
+            ).fetchall():
+                scope = "qzone:" + row["bot_id"]
+                pref = db.execute(
+                    "SELECT enabled FROM diary_preferences WHERE scope=?", (scope,)
+                ).fetchone()
+                if pref and not pref[0]:
+                    continue
+                db.execute("INSERT INTO diary_qzone_seen VALUES (?,?)", (row["id"], self.clock()))
+                db.execute(
+                    "INSERT OR IGNORE INTO diary_events VALUES (?,?,?,?,?,'qzone',1,0,?)",
+                    (
+                        hashlib.sha256(f"qzone:{row['id']}".encode()).hexdigest(),
+                        scope,
+                        row["bot_id"],
+                        row["bot_id"],
+                        "",
+                        row["updated_at"],
+                    ),
+                )
+
+    def refresh_today(self):
+        if self.config.current.diary.enabled:
+            self.capture_qzone()
+            if self.config.current.diary.live_preview:
+                return self.generate(self.today().isoformat(), include_current_day=True)
+
     @staticmethod
     def public(row):
         item = dict(row)
         item["facts"] = json.loads(item.pop("facts_json"))
-        item["visibility"] = "group" if item["group_id"] else "private"
+        item["visibility"] = (
+            "bot_activity"
+            if item["scope"].startswith("qzone:")
+            else "group"
+            if item["group_id"]
+            else "private"
+        )
+        item["is_final"] = bool(item["is_final"])
         return item
 
     def status(self):
+        self.refresh_today()
         today = self.today()
         yesterday = (today - timedelta(days=1)).isoformat()
         start, end = self.bounds(yesterday)
@@ -143,6 +187,8 @@ class DiaryService:
             ).fetchone()
         return {
             "enabled": self.config.current.diary.enabled,
+            "live_preview": self.config.current.diary.live_preview,
+            "min_events": self.config.current.diary.min_events,
             "auto_generate": self.config.current.diary.auto_generate,
             "generation_time": self.config.current.diary.generation_time,
             "timezone": self.config.current.soulbot.timezone,
@@ -157,18 +203,21 @@ class DiaryService:
             "last_auto_run": dict(last) if last else None,
         }
 
-    def generate(self, day, *, automatic=False):
+    def generate(self, day, *, automatic=False, include_current_day=False):
         target = date.fromisoformat(day)
         policy = self.config.current.diary
         if not policy.enabled:
             raise ValueError("请先启用本地日记")
-        if target >= self.today() or target < self.today() - timedelta(
-            days=policy.fact_retention_days
+        if (
+            target > self.today()
+            or (target == self.today() and (automatic or not include_current_day))
+            or target < self.today() - timedelta(days=policy.fact_retention_days)
         ):
             raise ValueError("请选择活动保留期内已结束的自然日")
         zone = self.config.current.soulbot.timezone
         start, end = self.bounds(day, zone)
-        created = existing = skipped = 0
+        created = existing = skipped = updated = 0
+        is_final = target < self.today()
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             self.cleanup(db)
@@ -186,15 +235,17 @@ class DiaryService:
                 SUM(CASE WHEN kind='chat' AND has_text=1 THEN 1 ELSE 0 END) AS text_chats,
                 SUM(CASE WHEN kind='chat' AND has_media=1 THEN 1 ELSE 0 END) AS media_chats,
                 SUM(CASE WHEN kind='proactive' THEN 1 ELSE 0 END) AS proactive_messages,
+                SUM(CASE WHEN kind='qzone' THEN 1 ELSE 0 END) AS qzone_posts,
                 MIN(occurred_at) AS first_event_at,MAX(occurred_at) AS last_event_at
                 FROM diary_events e LEFT JOIN diary_preferences p ON e.scope=p.scope
                 WHERE occurred_at>=? AND occurred_at<? AND COALESCE(p.enabled,1)=1 GROUP BY e.scope""",
                 (start, end),
             ).fetchall()
             for row in groups:
-                if db.execute(
-                    "SELECT 1 FROM diaries WHERE scope=? AND day=?", (row["scope"], day)
-                ).fetchone():
+                previous = db.execute(
+                    "SELECT * FROM diaries WHERE scope=? AND day=?", (row["scope"], day)
+                ).fetchone()
+                if previous and previous["is_final"]:
                     existing += 1
                     continue
                 if row["total"] < policy.min_events:
@@ -208,19 +259,37 @@ class DiaryService:
                         "text_chats",
                         "media_chats",
                         "proactive_messages",
+                        "qzone_posts",
                         "first_event_at",
                         "last_event_at",
                     )
                 }
                 channel = "这段群内会话" if row["group_id"] else "这段私聊"
                 name = self.config.current.soulbot.name
-                title = f"{day} · {name}的会话记录"[:80]
+                title = f"{day} · {name}的{'空间活动' if row['scope'].startswith('qzone:') else '会话'}记录"[
+                    :80
+                ]
                 role_text = f"今天在{channel}中，完成了 {facts['chat_replies']} 次有平台回执的交流，以及 {facts['proactive_messages']} 次已确认的主动联系。{name}把这些真实发生的回应，留作今天的一页小记录。"
+                if row["scope"].startswith("qzone:"):
+                    role_text = f"今天完成了 {facts['qzone_posts']} 次获得平台回执的空间发布。{name}把这份真实发生的分享，留在本地日记里。"
                 now = self.clock()
+                if previous:
+                    if (
+                        json.loads(previous["facts_json"]) != facts
+                        or bool(previous["is_final"]) != is_final
+                    ):
+                        db.execute(
+                            "UPDATE diaries SET facts_json=?,is_final=?,role_text=CASE WHEN role_source='manual' THEN role_text ELSE ? END,updated_at=?,revision=revision+1 WHERE id=?",
+                            (json.dumps(facts), int(is_final), role_text, now, previous["id"]),
+                        )
+                        updated += 1
+                    else:
+                        existing += 1
+                    continue
                 db.execute(
                     """INSERT INTO diaries(scope,bot_id,user_id,group_id,day,timezone,starts_at,ends_at,
-                    title,facts_json,role_text,role_source,created_at,updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,'template',?,?)""",
+                    title,facts_json,role_text,role_source,created_at,updated_at,is_final)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,'template',?,?,?)""",
                     (
                         row["scope"],
                         row["bot_id"],
@@ -235,6 +304,7 @@ class DiaryService:
                         role_text,
                         now,
                         now,
+                        int(is_final),
                     ),
                 )
                 created += 1
@@ -243,16 +313,20 @@ class DiaryService:
                     "INSERT INTO diary_runs VALUES (?,?,?,?,?)",
                     (day, zone, self.clock(), created, skipped),
                 )
-        self.db.audit("diary_generated", "automatic" if automatic else "manual")
+        if created or updated or not include_current_day:
+            self.db.audit("diary_generated", "automatic" if automatic else "manual")
         return {
             "day": day,
             "created": created,
             "existing": existing,
             "skipped_scopes": skipped,
             "already_processed": False,
+            "updated": updated,
+            "is_final": is_final,
         }
 
     def listing(self, query="", day="", offset=0, limit=30):
+        self.refresh_today()
         clause = " WHERE (instr(bot_id,?)>0 OR instr(user_id,?)>0 OR instr(group_id,?)>0 OR instr(title,?)>0)"
         args = [query] * 4
         if day:
@@ -304,6 +378,7 @@ class DiaryService:
         self.db.audit("diary_deleted")
 
     async def tick(self):
+        await asyncio.to_thread(self.refresh_today)
         policy = self.config.current.diary
         if not policy.enabled or not policy.auto_generate:
             return

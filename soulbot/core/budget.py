@@ -55,7 +55,7 @@ class BudgetService:
                 price is not None and cost + price > settings.behavior.daily_cost_cny
             ):
                 raise ProviderError("budget", "今日费用预算不足，已停止模型调用")
-            if purpose == "proactive" and (price is None or unknown):
+            if purpose in {"proactive", "qzone_autonomous"} and (price is None or unknown):
                 raise ProviderError(
                     "unknown_cost", "存在未知费用，已暂停主动模型调用；请配置价格并核对账单"
                 )

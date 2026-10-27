@@ -20,7 +20,9 @@ def install_diary_api(app, s, authorized):
         except LookupError:
             raise HTTPException(404, "日记不存在") from None
         except ValueError:
-            raise HTTPException(422, "请启用本地日记，并选择活动保留期内已结束的自然日") from None
+            raise HTTPException(
+                422, "请启用本地日记，并选择保留期内的日期；当天预览需启用当天选项"
+            ) from None
 
     @app.get("/api/diaries/status", dependencies=protected)
     def status():
@@ -37,7 +39,9 @@ def install_diary_api(app, s, authorized):
 
     @app.post("/api/diaries/generate", dependencies=protected)
     def generate(data: GenerateDiary):
-        return call(lambda: s.diary.generate(data.day))
+        return call(
+            lambda: s.diary.generate(data.day, include_current_day=data.include_current_day)
+        )
 
     @app.get("/api/diaries/{key}", dependencies=protected)
     def detail(key: int):

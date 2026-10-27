@@ -85,7 +85,7 @@ def test_schema_nine_migration_preserves_existing_state_and_is_idempotent(servic
             db.execute("DROP TABLE " + table)
         db.execute("UPDATE metadata SET value='9' WHERE key='schema_version'")
     again = Database(s.db.path)
-    assert again.get("schema_version") == "11" and again.get("preserved") == "fixture"
+    assert again.get("schema_version") == "13" and again.get("preserved") == "fixture"
     assert s.memory.listing()["total"] == memory
     Database(again.path)
 
