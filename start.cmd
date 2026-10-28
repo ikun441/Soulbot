@@ -27,12 +27,12 @@ if not errorlevel 1 (
   python scripts\bootstrap.py %*
   goto finish
 )
-echo 未找到 Python 3.11–3.13，请按 start.md 安装 Python 并勾选添加到 PATH。
+echo 未找到 Python 3.11–3.13，请按 README.md 安装 Python 并勾选添加到 PATH。
 exit /b 1
 :finish
 set "SOULBOT_EXIT=%errorlevel%"
 if not "%SOULBOT_EXIT%"=="0" (
-  echo 启动失败，请查看上方错误和 start.md。
+  echo 启动失败，请查看上方错误和 README.md。
   pause
 )
 exit /b %SOULBOT_EXIT%

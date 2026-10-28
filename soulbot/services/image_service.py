@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from soulbot.providers.image.base import ImageGenerationError
+from soulbot.providers.image.comfyui import ComfyUIProvider
 from soulbot.providers.image.openai_compatible import OpenAICompatibleImageProvider
 
 
@@ -24,12 +25,15 @@ class ImageGenerationService:
             OpenAICompatibleImageProvider(secrets),
             default=True,
         )
+        registry.register("image_generation", "comfyui", ComfyUIProvider())
         self.jobs, self.closed = set(), False
         self.last_test = None
 
     def _provider_fingerprint(self, settings):
         policy = settings.image_generation
         value = {
+            "provider": policy.provider,
+            "comfy": policy.comfy.model_dump() if policy.provider == "comfyui" else None,
             "base_url": policy.base_url,
             "model": policy.model,
             "size": policy.size,
@@ -75,6 +79,8 @@ class ImageGenerationService:
         }
 
     def configured(self):
+        if self.config.current.image_generation.provider == "comfyui":
+            return bool(self.config.current.image_generation.comfy.checkpoint)
         return bool(
             self.config.current.image_generation.model.strip() and self.secrets.get("image_api_key")
         )
@@ -103,7 +109,15 @@ class ImageGenerationService:
             key = uuid.uuid4().hex
             db.execute(
                 "INSERT INTO image_usage VALUES (?,?,?,?,?,'pending',1,?,?,NULL)",
-                (key, day, "openai_compatible", policy.model, purpose, cost, now),
+                (
+                    key,
+                    day,
+                    policy.provider,
+                    policy.comfy.checkpoint if policy.provider == "comfyui" else policy.model,
+                    purpose,
+                    cost,
+                    now,
+                ),
             )
         return key
 
@@ -120,11 +134,14 @@ class ImageGenerationService:
         policy = settings.image_generation
         prompt = prompt.strip()
         if self.closed or not policy.enabled:
-            raise ImageGenerationError("disabled", "云端图片生成尚未启用")
+            raise ImageGenerationError("disabled", "图片生成尚未启用")
         if not prompt or len(prompt) > policy.max_prompt_chars:
             raise ImageGenerationError("input", f"提示词需要 1–{policy.max_prompt_chars} 个字符")
         if not self.configured():
-            raise ImageGenerationError("configuration", "请先填写生图服务的独立 Key 和模型 ID")
+            raise ImageGenerationError(
+                "configuration",
+                "请先配置所选生图服务；ComfyUI 需要选择实际 checkpoint，云端需要独立 Key 和模型",
+            )
         if len(self.jobs) >= 2:
             raise ImageGenerationError("busy", "生图任务较多，请稍后再试")
         task = asyncio.current_task()
@@ -136,7 +153,9 @@ class ImageGenerationService:
             key = self.reserve(settings, purpose)
             fingerprint = self._provider_fingerprint(settings)
             async with asyncio.timeout(policy.timeout_seconds):
-                result = await self.registry.resolve("image_generation").generate(prompt, policy)
+                result = await self.registry.resolve("image_generation", policy.provider).generate(
+                    prompt, policy
+                )
             self._record_test(fingerprint, ok=True)
             self.finish(key, "completed")
             return result

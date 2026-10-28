@@ -133,7 +133,7 @@ class QZoneService:
             else STATUS[item["status"]]
         )
         item["approval_required"] = self.s.config.current.qzone.require_approval
-        item["privacy_issues"] = privacy_issues(item["content"])
+        item["privacy_issues"] = self.content_issues(item["content"])
         item["approval_expired"] = bool(
             item["approved_at"] is not None and item["approved_at"] + 86400 <= self.clock()
         )
@@ -177,7 +177,7 @@ class QZoneService:
             if data.mode == "ai"
             else "manual_public_input"
         )
-        if data.mode == "ai" and privacy_issues(data.content):
+        if data.mode == "ai" and self.content_issues(data.content):
             raise ValueError("公开主题包含疑似私人信息，请先移除")
         with self.s.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -285,7 +285,7 @@ class QZoneService:
                 raise StateConflict("草稿已变化或无法审批，请刷新")
             owner = self.s.config.current.personality.owner_qq
             if data.action == "approve" and (
-                not owner or not data.public_confirmed or privacy_issues(row["content"])
+                not owner or not data.public_confirmed or self.content_issues(row["content"])
             ):
                 raise ValueError("请设置主人 QQ、移除隐私提示并确认正文可公开")
             status = {"approve": "approved", "reject": "rejected", "cancel": "cancelled"}[
@@ -321,6 +321,13 @@ class QZoneService:
         if len(recent) >= policy.max_posts_per_week:
             next_at = max(next_at, recent[policy.max_posts_per_week - 1] + 7 * 86400)
         return {"used_last_seven_days": len(recent), "next_allowed_at": max(next_at, self.clock())}
+
+    def content_issues(self, content):
+        issues = privacy_issues(content)
+        memory = getattr(self.s, "memory", None)
+        if memory and memory.private_echo(content):
+            issues.append("包含其它会话记忆原文")
+        return issues
 
     def status(self):
         with self.s.db.connect() as db:
@@ -378,7 +385,7 @@ class QZoneService:
             and cfg.qq.enabled
             and cfg.personality.owner_qq
             and row["content"]
-            and not privacy_issues(row["content"])
+            and not self.content_issues(row["content"])
         ):
             return False
         if (
@@ -388,7 +395,8 @@ class QZoneService:
         ):
             return False
         if autonomous and not (
-            cfg.qzone.autonomous_enabled
+            not cfg.automation.paused
+            and cfg.qzone.autonomous_enabled
             and not cfg.qzone.require_approval
             and row["source"] == "autonomous_public_topic"
             and row["bot_id"] == cfg.qzone.auto_bot_id
@@ -514,11 +522,13 @@ class QZoneService:
 
     def auto_policy_key(self):
         cfg = self.s.config.current
-        return self.digest([cfg.qzone.model_dump(), cfg.personality.owner_qq])
+        return self.digest(
+            [cfg.qzone.model_dump(), cfg.personality.owner_qq, cfg.automation.paused]
+        )
 
     def auto_reason(self):
         cfg = self.s.config.current
-        if not cfg.qzone.enabled or not cfg.qzone.autonomous_enabled:
+        if cfg.automation.paused or not cfg.qzone.enabled or not cfg.qzone.autonomous_enabled:
             return "disabled"
         if cfg.qzone.require_approval:
             return "approval_required"
@@ -529,7 +539,7 @@ class QZoneService:
             and datetime.fromtimestamp(self.clock(), ZoneInfo(cfg.soulbot.timezone)).hour < 8
         ):
             return "quiet_hours"
-        if any(privacy_issues(topic) for topic in cfg.qzone.auto_topics):
+        if any(self.content_issues(topic) for topic in cfg.qzone.auto_topics):
             return "private_topic"
         transport = self.s.qq_transport
         if not transport or cfg.qzone.auto_bot_id not in transport.connected():

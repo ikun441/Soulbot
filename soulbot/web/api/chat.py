@@ -30,10 +30,18 @@ class SendTest(Model):
     confirm: Literal[True]
 
 
+class RetryRequest(SendTest):
+    source_id: int | None = Field(default=None, ge=1)
+
+
 def install_chat_api(app, s, authorized):
     @app.post("/api/llm/models", dependencies=[Depends(authorized)])
     async def models():
         return await s.llm.models()
+
+    @app.post("/api/llm/tools-test", dependencies=[Depends(authorized)])
+    async def test_tools():
+        return await s.llm.verify_tools()
 
     @app.post("/api/llm/test", dependencies=[Depends(authorized)])
     async def test():
@@ -170,3 +178,45 @@ def install_chat_api(app, s, authorized):
         if not ok:
             raise HTTPException(502, "发送失败，请检查 QQ 登录、接入权限和网络；未报告成功")
         return {"ok": True, "message": "平台已确认发送测试消息给主人；请在 QQ 中核对接收"}
+
+    @app.post("/api/qq/retry-last", dependencies=[Depends(authorized)])
+    async def retry_last(data: RetryRequest):
+        """Explicit administrator replay of an existing owner request; not an incoming QQ event."""
+        from uuid import uuid4
+
+        owner = s.config.current.personality.owner_qq
+        connected = s.qq_transport.connected() if s.qq_transport else []
+        if not owner or not connected:
+            raise HTTPException(422, "请先设置主人并连接 QQ 机器人")
+        bot = connected[0]
+        scope = f"{bot}:p:{owner}"
+        if scope in s.agent.pending:
+            raise HTTPException(409, "主人私聊正在处理，请稍后重试")
+        now = time.time()
+        with s.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT id,content FROM chat_context WHERE scope=? AND role='user' AND expires>? AND (? IS NULL OR id=?) ORDER BY id DESC LIMIT 1",
+                (scope, now, data.source_id, data.source_id),
+            ).fetchone()
+            if not row:
+                raise HTTPException(404, "没有可重试的主人私聊请求，请在 QQ 发送新消息")
+            marker = "owner_retry_" + str(row["id"])
+            recent = db.execute("SELECT value FROM metadata WHERE key='owner_retry_at'").fetchone()
+            if db.execute("SELECT 1 FROM metadata WHERE key=?", (marker,)).fetchone() or (
+                recent and now - float(recent[0]) < 60
+            ):
+                raise HTTPException(
+                    429, "该请求已重试或仍在冷却中；请在 QQ 发送新请求，避免重复生成"
+                )
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('owner_retry_at',?)", (str(now),))
+            db.execute("INSERT INTO metadata VALUES (?,?)", (marker, str(now)))
+        event = ChatEvent(bot, owner, "web-retry:" + uuid4().hex, row["content"], directed=True)
+        await asyncio.to_thread(s.db.audit, "owner_request_retried", str(row["id"]))
+        delivered = await s.agent.process([(event, "direct")])
+        if not delivered:
+            raise HTTPException(502, "请求未完成或发送未确认；请查看日志，系统不会自动重试生成")
+        return {
+            "ok": True,
+            "message": "已重新处理主人最近的私聊请求，平台已确认发送；本次调用计入预算",
+        }

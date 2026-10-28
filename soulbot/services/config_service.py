@@ -190,6 +190,8 @@ class Behavior(Model):
     proactive_interval_seconds: int = Field(default=180, ge=180, le=86400)
     max_proactive_per_day: int = Field(default=3, ge=0, le=10)
     global_send_interval_seconds: float = Field(default=1, ge=0.1, le=10, allow_inf_nan=False)
+    split_long_replies: bool = True
+    reply_sentences_per_message: int = Field(default=2, ge=1, le=5)
     context_turns: int = Field(default=8, ge=0, le=20)
     context_retention_hours: int = Field(default=24, ge=1, le=168)
     autonomous: bool = False
@@ -302,6 +304,10 @@ class MemeSettings(Model):
 
 
 class MediaToolPolicies(Model):
+    search_web: Literal["deny", "auto", "approval"] = "auto"
+    browse_memory: Literal["deny", "auto", "approval"] = "auto"
+    retrieve_memory: Literal["deny", "auto", "approval"] = "auto"
+    save_memory: Literal["deny", "auto", "approval"] = "auto"
     search_emoji: Literal["deny", "auto", "approval"] = "auto"
     browse_emoji: Literal["deny", "auto", "approval"] = "auto"
     select_emoji: Literal["deny", "auto", "approval"] = "auto"
@@ -386,7 +392,55 @@ class ASRSettings(Model):
         return LLMEndpoint.valid_url(value)
 
 
+class ComfySettings(Model):
+    base_url: str = "http://127.0.0.1:8188"
+    checkpoint: str = Field(default="", max_length=300)
+    negative_prompt: str = Field(default="text, watermark, low quality", max_length=1000)
+    width: int = Field(default=512, ge=256, le=1536, multiple_of=64)
+    height: int = Field(default=512, ge=256, le=1536, multiple_of=64)
+    steps: int = Field(default=20, ge=1, le=60)
+    cfg: float = Field(default=7, ge=0, le=20, allow_inf_nan=False)
+    sampler: str = Field(default="euler", pattern=r"^[a-z0-9_]+$", max_length=60)
+    scheduler: str = Field(default="normal", pattern=r"^[a-z0-9_]+$", max_length=60)
+
+    @field_validator("base_url")
+    @classmethod
+    def local_url(cls, value):
+        from urllib.parse import urlsplit
+
+        value = LLMEndpoint.valid_url(value)
+        url = urlsplit(value)
+        if (
+            url.scheme != "http"
+            or url.hostname not in {"127.0.0.1", "localhost", "::1"}
+            or url.path not in {"", "/"}
+        ):
+            raise ValueError("本地 ComfyUI 地址必须为 http://回环地址:端口")
+        return value.rstrip("/")
+
+    @field_validator("checkpoint")
+    @classmethod
+    def model_file(cls, value):
+        from pathlib import PurePosixPath
+
+        if value and (
+            PurePosixPath(value).is_absolute()
+            or ".." in value.replace("\\", "/").split("/")
+            or ":" in value
+        ):
+            raise ValueError("请选择 ComfyUI 实际返回的模型名，不接受绝对路径")
+        return value
+
+    @model_validator(mode="after")
+    def bounded_pixels(self):
+        if self.width * self.height > 1536 * 1024:
+            raise ValueError("本地单张图片最多 1536×1024 像素")
+        return self
+
+
 class ImageGenerationSettings(Model):
+    provider: Literal["openai_compatible", "comfyui"] = "openai_compatible"
+    comfy: ComfySettings = Field(default_factory=ComfySettings)
     enabled: bool = False
     base_url: str = "https://api.openai.com/v1"
     model: str = Field(default="", max_length=120)
@@ -396,7 +450,7 @@ class ImageGenerationSettings(Model):
     quality: str = Field(default="", max_length=24, pattern=r"^[a-zA-Z0-9_-]*$")
     response_format: Literal["omit", "b64_json"] = "omit"
     output_format: Literal["omit", "png", "jpeg", "webp"] = "omit"
-    timeout_seconds: float = Field(default=120, ge=5, le=180, allow_inf_nan=False)
+    timeout_seconds: float = Field(default=120, ge=5, le=600, allow_inf_nan=False)
     max_prompt_chars: int = Field(default=1000, ge=10, le=4000)
     max_calls_per_minute: int = Field(default=2, ge=1, le=10)
     max_images_per_day: int = Field(default=10, ge=1, le=100)
@@ -483,6 +537,9 @@ class DiarySettings(Model):
     enabled: bool = False
     live_preview: bool = True
     auto_generate: bool = True
+    weekly_enabled: bool = True
+    delivery_mode: Literal["manual", "daily", "weekly"] = "manual"
+    delivery_bot_id: str = Field(default="", pattern=r"^([1-9][0-9]{4,11})?$")
     generation_time: str = Field(default="00:30", pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
     min_events: int = Field(default=2, ge=1, le=100)
     fact_retention_days: int = Field(default=90, ge=7, le=365)
@@ -490,6 +547,11 @@ class DiarySettings(Model):
 
 class ProactiveSettings(Model):
     enabled: bool = False
+    auto_drafts: bool = False
+    max_auto_drafts_per_day: int = Field(default=3, ge=1, le=20)
+    draft_topic: str = Field(
+        default="轻松问候，关心对方是否愿意聊天，不要求立即回复", min_length=1, max_length=300
+    )
     evaluation_interval_seconds: int = Field(default=30, ge=5, le=300)
     max_per_user_day: int = Field(default=1, ge=1, le=3)
     max_daily_total: int = Field(default=10, ge=1, le=100)
@@ -499,8 +561,40 @@ class ProactiveSettings(Model):
 
 class MemorySettings(Model):
     enabled: bool = False
+    global_context: bool = True
     max_items: int = Field(default=4, ge=1, le=10)
     max_chars: int = Field(default=1200, ge=200, le=4000)
+
+
+class SearchSettings(Model):
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:8080"
+    timeout_seconds: float = Field(default=15, ge=2, le=30, allow_inf_nan=False)
+    max_results: int = Field(default=5, ge=1, le=10)
+    max_calls_per_minute: int = Field(default=6, ge=1, le=60)
+    max_calls_per_day: int = Field(default=100, ge=1, le=1000)
+    price_cny_per_request: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_url(cls, value):
+        return LLMEndpoint.valid_url(value)
+
+
+class ExplorationSettings(Model):
+    enabled: bool = False
+    interval_minutes: int = Field(default=120, ge=10, le=10080)
+    max_daily_tasks: int = Field(default=3, ge=1, le=20)
+    topics: list[str] = Field(default_factory=lambda: ["天文科普"], min_length=1, max_length=20)
+
+    @field_validator("topics")
+    @classmethod
+    def valid_topics(cls, value):
+        return QZoneSettings.public_topics(value)
+
+
+class AutomationSettings(Model):
+    paused: bool = False
 
 
 class Settings(Model):
@@ -525,6 +619,9 @@ class Settings(Model):
     proactive: ProactiveSettings = Field(default_factory=ProactiveSettings)
     diary: DiarySettings = Field(default_factory=DiarySettings)
     qzone: QZoneSettings = Field(default_factory=QZoneSettings)
+    search: SearchSettings = Field(default_factory=SearchSettings)
+    exploration: ExplorationSettings = Field(default_factory=ExplorationSettings)
+    automation: AutomationSettings = Field(default_factory=AutomationSettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):

@@ -15,7 +15,7 @@ def main():
     assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", VERSION)
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert metadata["tool"]["setuptools"]["dynamic"]["version"]["attr"] == "soulbot.__version__"
-    assert f"## {VERSION} - " in (ROOT / "docs/version.md").read_text()
+    assert f"## {VERSION} - " in (ROOT / "docs/version.me").read_text()
     assert (
         f"SoulBot {VERSION}" in (ROOT / "soulbot/web/static/js/app.js").read_text()
         or "B.version" in (ROOT / "soulbot/web/static/js/app.js").read_text()

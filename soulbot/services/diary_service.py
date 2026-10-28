@@ -43,6 +43,7 @@ class DiaryService:
         self.config, self.db, self.clock = config, db, clock
         self.task = None
         self.closed = False
+        self.periods = None
 
     def today(self):
         return datetime.fromtimestamp(
@@ -106,6 +107,7 @@ class DiaryService:
             db.execute("BEGIN IMMEDIATE")
             count = db.execute("DELETE FROM diaries WHERE scope=?", (event.scope,)).rowcount
             db.execute("DELETE FROM diary_events WHERE scope=?", (event.scope,))
+            db.execute("DELETE FROM diary_summaries WHERE scope=?", (event.scope,))
             # Deleting personal diaries also pauses future collection in this scope.
             db.execute(
                 "INSERT INTO diary_preferences VALUES (?,0) ON CONFLICT(scope) DO UPDATE SET enabled=0",
@@ -279,7 +281,7 @@ class DiaryService:
                         or bool(previous["is_final"]) != is_final
                     ):
                         db.execute(
-                            "UPDATE diaries SET facts_json=?,is_final=?,role_text=CASE WHEN role_source='manual' THEN role_text ELSE ? END,updated_at=?,revision=revision+1 WHERE id=?",
+                            "UPDATE diaries SET facts_json=?,is_final=?,role_text=CASE WHEN role_source IN ('manual','model') THEN role_text ELSE ? END,updated_at=?,revision=revision+1 WHERE id=?",
                             (json.dumps(facts), int(is_final), role_text, now, previous["id"]),
                         )
                         updated += 1
@@ -375,18 +377,24 @@ class DiaryService:
                 (row["scope"], row["starts_at"], row["ends_at"]),
             )
             db.execute("DELETE FROM diaries WHERE id=?", (key,))
+            db.execute(
+                "DELETE FROM diary_summaries WHERE scope=? AND week_start<=? AND week_end>?",
+                (row["scope"], row["day"], row["day"]),
+            )
         self.db.audit("diary_deleted")
 
     async def tick(self):
         await asyncio.to_thread(self.refresh_today)
         policy = self.config.current.diary
-        if not policy.enabled or not policy.auto_generate:
+        if self.config.current.automation.paused or not policy.enabled or not policy.auto_generate:
             return
         now = datetime.fromtimestamp(self.clock(), ZoneInfo(self.config.current.soulbot.timezone))
         if now.strftime("%H:%M") >= policy.generation_time:
             await asyncio.to_thread(
                 self.generate, (now.date() - timedelta(days=1)).isoformat(), automatic=True
             )
+            if self.periods:
+                await self.periods.tick()
 
     async def startup(self):
         if self.task and not self.task.done():

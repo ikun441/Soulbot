@@ -22,8 +22,8 @@ class BudgetService:
     @staticmethod
     def cost_totals(db, day):
         row = db.execute(
-            "SELECT COALESCE(SUM(cost_cny),0),COALESCE(SUM(CASE WHEN cost_cny IS NULL AND status!='rejected' THEN 1 ELSE 0 END),0) FROM (SELECT cost_cny,status FROM llm_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM tts_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM asr_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM image_usage WHERE day=?)",
-            (day, day, day, day),
+            "SELECT COALESCE(SUM(cost_cny),0),COALESCE(SUM(CASE WHEN cost_cny IS NULL AND status!='rejected' THEN 1 ELSE 0 END),0) FROM (SELECT cost_cny,status FROM llm_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM tts_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM asr_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM image_usage WHERE day=? UNION ALL SELECT cost_cny,status FROM search_usage WHERE day=?)",
+            (day, day, day, day, day),
         ).fetchone()
         return row[0], row[1]
 
@@ -55,7 +55,12 @@ class BudgetService:
                 price is not None and cost + price > settings.behavior.daily_cost_cny
             ):
                 raise ProviderError("budget", "今日费用预算不足，已停止模型调用")
-            if purpose in {"proactive", "qzone_autonomous"} and (price is None or unknown):
+            if purpose in {
+                "proactive",
+                "qzone_autonomous",
+                "exploration",
+                "diary_polish_auto",
+            } and (price is None or unknown):
                 raise ProviderError(
                     "unknown_cost", "存在未知费用，已暂停主动模型调用；请配置价格并核对账单"
                 )
@@ -126,6 +131,12 @@ class BudgetService:
                 "SELECT COUNT(*),COALESCE(SUM(chars),0) FROM tts_usage WHERE day=?", (day,)
             ).fetchone()
             cost, unknown = self.cost_totals(db, day)
+            search = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT id,day,purpose,status,cost_cny,created_at FROM search_usage ORDER BY created_at DESC LIMIT 50"
+                )
+            ]
             recognition = [
                 dict(row)
                 for row in db.execute(
@@ -153,6 +164,7 @@ class BudgetService:
             "reserved_or_used_tokens": sum(r["input_tokens"] + r["output_tokens"] for r in rows),
             "known_or_estimated_cost_cny": cost,
             "unknown_cost_calls": unknown,
+            "search": {"recent": search},
             "tts": {"recent": speech, "calls": today[0], "chars": today[1]},
             "asr": {"recent": recognition, "calls": asr_today[0], "seconds": asr_today[1]},
             "image_generation": {

@@ -5,6 +5,7 @@ import yaml
 
 from soulbot.adapters.onebot_v11 import create_runtime
 from soulbot.app import build_services
+from soulbot.services.backup_service import BackupService, InstanceLock
 from soulbot.services.environment_service import EnvironmentError
 
 
@@ -15,6 +16,9 @@ def main():
 
     root = Path(os.environ.get("SOULBOT_HOME", Path(__file__).resolve().parent)).resolve()
     try:
+        instance_lock = InstanceLock(root)
+        instance_lock.__enter__()
+        BackupService(root).apply_pending(instance_lock)
         services = build_services(root)
         if "--check" in sys.argv:
             print("配置与数据库初始化检查通过")
@@ -22,7 +26,7 @@ def main():
         server = create_runtime(services)
         settings = services.running_config
         host = "127.0.0.1" if settings.web.host == "0.0.0.0" else settings.web.host
-        print(f"SoulBot {VERSION} · M5 空间草稿与自主发布", flush=True)
+        print(f"SoulBot {VERSION} · 周期日记、搜索与稳定部署", flush=True)
         print(f"WebUI：http://{host}:{settings.web.port}  |  Ctrl+C 停止", flush=True)
         print("人格与情绪属于程序模拟。配置模型和 NapCat 后即可进行文本聊天。", flush=True)
         server.run()
@@ -35,6 +39,9 @@ def main():
         # Do not print raw exception content: malformed config may contain secrets.
         print(f"启动失败（{type(exc).__name__}）：请检查 config.yaml、端口占用和 data 目录权限。")
         raise SystemExit(1) from None
+    finally:
+        if "instance_lock" in locals():
+            instance_lock.__exit__()
 
 
 if __name__ == "__main__":

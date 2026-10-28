@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     if not (3, 11) <= sys.version_info[:2] < (3, 14):
-        raise SystemExit("需要 Python 3.11–3.13。请安装后重试，详见 start.md。")
+        raise SystemExit("需要 Python 3.11–3.13。请安装后重试，详见 README.md。")
     os.chdir(ROOT)
     python = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if not python.exists():
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     try:
         main()
     except (subprocess.CalledProcessError, OSError):
-        print("启动准备失败。请检查网络、Python 安装和目录权限，详见 start.md。")
+        print("启动准备失败。请检查网络、Python 安装和目录权限，详见 README.md。")
         raise SystemExit(1) from None
     except KeyboardInterrupt:
         raise SystemExit(0) from None

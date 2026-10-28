@@ -180,7 +180,7 @@ def install_media_api(app, s, authorized):
             "policies": s.config.current.tools.model_dump(),
             "available": specifications(s),
             "max_calls_per_task": 5,
-            "approval_available": False,
+            "approval_available": True,
         }
 
     @app.post("/api/media/send-test", dependencies=protected)
@@ -196,7 +196,7 @@ def install_media_api(app, s, authorized):
             and s.media.info(data.image.split(":", 1)[1])["source"] == "image_generation"
         )
         if generated and not s.agent.executor.media_enabled("send_generated_image"):
-            raise HTTPException(403, "云端生图或对应工具权限已关闭，已阻止发送")
+            raise HTTPException(403, "图片生成或对应工具权限已关闭，已阻止发送")
         image = await asyncio.to_thread(read_image, s, data.image)
         now = time.time()
         with s.db.connect() as db:

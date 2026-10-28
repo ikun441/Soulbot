@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import Depends, HTTPException, Request
 
+from soulbot.services.config_service import ComfySettings
 from soulbot.tools.media_tools import GenerateImage
 
 
@@ -17,6 +18,10 @@ def install_image_api(app, s, authorized):
             "active": len(s.images.jobs),
             "usage": s.budget.summary(s.config.current)["image_generation"],
         }
+
+    @app.post("/api/image/comfyui/probe", dependencies=protected)
+    async def probe(data: ComfySettings):
+        return await s.providers.resolve("image_generation", "comfyui").probe(data)
 
     @app.post("/api/image/generate", dependencies=protected)
     async def generate(data: GenerateImage, request: Request):

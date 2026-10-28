@@ -311,7 +311,7 @@ def test_tool_turns_share_task_budget(services):
             200,
             json={
                 "choices": [{"message": {"content": "hello"}}],
-                "usage": {"prompt_tokens": 4, "completion_tokens": 1},
+                "usage": {"prompt_tokens": 600, "completion_tokens": 1},
             },
         )
 
@@ -321,6 +321,7 @@ def test_tool_turns_share_task_budget(services):
         state = {}
         messages = [{"role": "user", "content": "hello"}]
         await services.llm.complete(messages, task_state=state)
+        assert state["tokens"] == 601
         with pytest.raises(ProviderError, match="本次任务"):
             await services.llm.complete(messages, task_state=state)
 

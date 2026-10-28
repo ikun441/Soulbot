@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 13:
+            if version > 15:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -310,3 +310,50 @@ class Database:
                     COMMIT;
                 """
                 )
+
+            if version < 14:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS search_usage (
+                        id TEXT PRIMARY KEY, day TEXT NOT NULL, purpose TEXT NOT NULL,
+                        status TEXT NOT NULL, cost_cny REAL, created_at REAL NOT NULL);
+                    CREATE INDEX IF NOT EXISTS search_usage_time ON search_usage(day,created_at);
+                    CREATE TABLE IF NOT EXISTS exploration_notes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL,
+                        results_json TEXT NOT NULL, created_at REAL NOT NULL);
+                    CREATE TABLE IF NOT EXISTS diary_summaries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
+                        week_start TEXT NOT NULL, week_end TEXT NOT NULL, timezone TEXT NOT NULL,
+                        source_ids TEXT NOT NULL, facts_json TEXT NOT NULL,
+                        role_text TEXT NOT NULL, created_at REAL NOT NULL,
+                        UNIQUE(scope,week_start));
+                    CREATE TABLE IF NOT EXISTS diary_polish_runs (
+                        request_id TEXT PRIMARY KEY, diary_id INTEGER NOT NULL,
+                        revision INTEGER NOT NULL, status TEXT NOT NULL,
+                        created_at REAL NOT NULL, UNIQUE(diary_id,revision));
+                    CREATE TABLE IF NOT EXISTS diary_deliveries (
+                        kind TEXT NOT NULL, period TEXT NOT NULL, bot_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL, payload_json TEXT NOT NULL,
+                        PRIMARY KEY(kind,period,bot_id,user_id));
+                    UPDATE metadata SET value='14' WHERE key='schema_version';
+                    COMMIT;
+                """)
+
+            if version < 15:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS proactive_draft_runs (
+                        day TEXT NOT NULL, bot_id TEXT NOT NULL, user_id TEXT NOT NULL,
+                        status TEXT NOT NULL, created_at REAL NOT NULL,
+                        PRIMARY KEY(day,bot_id,user_id));
+                    CREATE TABLE IF NOT EXISTS tool_approvals (
+                        id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, name TEXT NOT NULL,
+                        arguments_json TEXT NOT NULL, context_json TEXT NOT NULL, owner TEXT NOT NULL,
+                        status TEXT NOT NULL, result_json TEXT, created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL, revision INTEGER NOT NULL DEFAULT 0);
+                    CREATE INDEX IF NOT EXISTS tool_approvals_state ON tool_approvals(status,created_at);
+                    CREATE TABLE IF NOT EXISTS diary_summary_deleted (
+                        scope TEXT NOT NULL, week_start TEXT NOT NULL, PRIMARY KEY(scope,week_start));
+                    UPDATE metadata SET value='15' WHERE key='schema_version';
+                    COMMIT;
+                """)

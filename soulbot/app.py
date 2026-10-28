@@ -38,6 +38,7 @@ from soulbot.services.audio_service import AudioStore
 from soulbot.services.auth_service import AccountChange, AuthService
 from soulbot.services.auth_service import AdminAccount as Account
 from soulbot.services.config_service import ConfigService, Model, Settings
+from soulbot.services.diary_periods import DiaryPeriods
 from soulbot.services.diary_service import DiaryService
 from soulbot.services.environment_service import EnvironmentError, EnvironmentService
 from soulbot.services.image_service import ImageGenerationService
@@ -47,7 +48,9 @@ from soulbot.services.meme_service import MemeService
 from soulbot.services.provider_diagnostics import ProviderDiagnostics
 from soulbot.services.qzone_service import QZoneService
 from soulbot.services.render_service import HTMLRenderService
+from soulbot.services.search_service import SearchService
 from soulbot.services.secret_service import SecretService
+from soulbot.services.tool_approval import ToolApprovals
 from soulbot.services.tts_service import TTSService
 from soulbot.storage.database import Database
 from soulbot.tools.emoji import EmojiLibrary
@@ -109,6 +112,9 @@ class Services:
     scheduler: ProactiveScheduler | None = None
     diary: DiaryService | None = None
     qzone: QZoneService | None = None
+    search: SearchService | None = None
+    periods: DiaryPeriods | None = None
+    approvals: ToolApprovals | None = None
 
 
 def build_services(root):
@@ -138,6 +144,9 @@ def build_services(root):
     services.consent = ConsentStore(config, db)
     services.diary = DiaryService(config, db)
     services.qzone = QZoneService(services)
+    services.search = SearchService(services)
+    services.periods = DiaryPeriods(services)
+    services.diary.periods = services.periods
     services.diagnostics = ProviderDiagnostics()
     services.llm = LLMService(
         config,
@@ -147,6 +156,7 @@ def build_services(root):
         db.audit,
         services.diagnostics,
     )
+    services.llm.memory = services.memory
     services.media = MediaStore(root, db)
     services.media.cleanup()
     services.audio = AudioStore(root, db)
@@ -173,6 +183,23 @@ def build_services(root):
     services.renderer = HTMLRenderService(root, config, db.audit)
     services.providers.register("html_render", "chromium", services.renderer, default=True)
     register_media_tools(services)
+    from soulbot.tools.social_tools import register_social_tools
+
+    register_social_tools(services)
+
+    def argument_guard(name, arguments, context):
+        if name in {
+            "search_web",
+            "generate_image",
+            "synthesize_speech",
+            "generate_meme",
+            "render_html",
+        } and services.memory.private_echo(arguments.model_dump_json(), context.scope):
+            raise PermissionError("工具参数含其它会话记忆原文")
+
+    services.tools.argument_guard = argument_guard
+    services.approvals = ToolApprovals(services)
+    services.tools.approval_queue = services.approvals.enqueue
     services.agent = SoulBotAgent(config, db, services.llm, services)
     services.scheduler = ProactiveScheduler(services)
     services.agent.executor.proactive_guard = services.scheduler.allowed_event
@@ -189,6 +216,8 @@ def build_services(root):
         connection.execute(
             "UPDATE image_usage SET status='uncertain',error_kind='interrupted' WHERE status='pending'"
         )
+    with db.connect() as connection:
+        connection.execute("UPDATE search_usage SET status='uncertain' WHERE status='pending'")
     return services
 
 
@@ -204,9 +233,11 @@ def create_web_app(root: Path, services=None):
         await s.scheduler.startup()
         await s.diary.startup()
         await s.qzone.startup()
+        await s.search.startup()
         try:
             yield
         finally:
+            await s.search.close()
             await s.qzone.close()
             await s.diary.close()
             await s.scheduler.close()
@@ -487,7 +518,8 @@ def create_web_app(root: Path, services=None):
             "usage": s.budget.summary(s.config.current),
             "meme_generator": s.meme.status(),
             "restart_required": restart_required(),
-            "stage": "M5 · 空间草稿与自主发布",
+            "stage": "周期日记、搜索与稳定部署",
+            "automation_paused": s.config.current.automation.paused,
             "emotion": s.emotion.snapshot(),
         }
 
@@ -581,6 +613,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.qzone import install_qzone_api
 
     install_qzone_api(app, s, authorized)
+    from soulbot.web.api.platform import install_platform_api
+
+    install_platform_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

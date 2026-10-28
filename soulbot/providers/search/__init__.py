@@ -1,0 +1,9 @@
+from typing import Protocol
+
+
+class SearchProvider(Protocol):
+    capabilities: frozenset[str]
+
+    async def search(self, query: str, limit: int) -> list[dict[str, str]]: ...
+    async def health_check(self) -> bool: ...
+    async def close(self) -> None: ...

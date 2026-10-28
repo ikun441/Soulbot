@@ -400,7 +400,7 @@ def test_schema_five_migration_preserves_account_and_tts_and_pending_asr(service
         db.execute("DROP TABLE asr_usage")
         db.execute("UPDATE metadata SET value='5' WHERE key='schema_version'")
     again = build_services(tmp_path)
-    assert again.auth.valid(token) and again.db.get("schema_version") == "13"
+    assert again.auth.valid(token) and again.db.get("schema_version") == "15"
     with sqlite3.connect(again.db.path) as db:
         assert db.execute("SELECT * FROM admins").fetchone() == admin
         assert db.execute("SELECT id FROM tts_usage").fetchone()[0] == key

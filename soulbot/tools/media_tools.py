@@ -76,9 +76,9 @@ class ToolPermissions(PermissionEngine):
         super().__init__()
         self.config = config
 
-    def require(self, name):
+    def require(self, name, *, approved=False):
         self.policies = self.config.current.tools.model_dump()
-        super().require(name)
+        super().require(name, approved=approved)
 
 
 def read_image(s, reference, scope=None):
@@ -221,7 +221,7 @@ def register_media_tools(s):
                 description,
                 schema,
                 handler,
-                timeout=210
+                timeout=620
                 if name == "generate_image"
                 else 150
                 if name == "synthesize_speech"
@@ -265,9 +265,13 @@ def specifications(s):
             },
         }
         for tool in s.tools.tools.values()
-        if getattr(config.tools, tool.name, "deny") == "auto"
+        if getattr(config.tools, tool.name, "deny") in {"auto", "approval"}
         and (
-            config.image_generation.enabled and s.images.configured()
+            config.search.enabled
+            if tool.name == "search_web"
+            else config.memory.enabled
+            if tool.name in {"retrieve_memory", "browse_memory", "save_memory"}
+            else config.image_generation.enabled and s.images.configured()
             if tool.name == "generate_image"
             else config.tts.enabled and s.speech.configured()
             if tool.name == "synthesize_speech"

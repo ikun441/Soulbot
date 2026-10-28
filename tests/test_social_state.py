@@ -44,7 +44,7 @@ def test_v7_migration_preserves_existing_state_and_is_idempotent(services):
         db.execute("DROP TABLE social_observations")
         db.execute("UPDATE metadata SET value='7' WHERE key='schema_version'")
     reopened = Database(services.db.path)
-    assert reopened.get("schema_version") == "13" and reopened.get("preserved") == "fixture"
+    assert reopened.get("schema_version") == "15" and reopened.get("preserved") == "fixture"
     Database(reopened.path)
     assert EmotionEngine(services.config, reopened).snapshot()["state"] == "calm"
 

@@ -289,7 +289,7 @@ def test_schema_four_migration_preserves_account_and_usage(services, tmp_path):
         db.execute("UPDATE metadata SET value='4' WHERE key='schema_version'")
     again = build_services(tmp_path)
     assert again.db.get("fixture") == "preserve"
-    assert again.db.get("schema_version") == "13"
+    assert again.db.get("schema_version") == "15"
 
 
 def test_concurrent_speech_is_bounded_and_shutdown_cancels_jobs(services, monkeypatch):

@@ -15,5 +15,5 @@ for candidate in python3.11 python3.12 python3.13 python3 python; do
     exec "$candidate" scripts/bootstrap.py "$@"
   fi
 done
-echo "未找到 Python 3.11–3.13。请先安装 Python（见 start.md），或设置 SOULBOT_PYTHON 指向已有解释器。"
+echo "未找到 Python 3.11–3.13。请先安装 Python（见 README.md），或设置 SOULBOT_PYTHON 指向已有解释器。"
 exit 1

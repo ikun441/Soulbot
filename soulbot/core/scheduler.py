@@ -269,7 +269,7 @@ class ProactiveScheduler:
         now = self.clock()
         settings = self.config.current
         policy = settings.proactive
-        if not policy.enabled:
+        if settings.automation.paused or not policy.enabled:
             return "global_disabled"
         if not settings.qq.enabled or not settings.behavior.private_chat:
             return "qq_disabled"
@@ -406,8 +406,105 @@ class ProactiveScheduler:
             except Exception:
                 self.db.audit("diary_capture_failed")
 
+    async def create_ai_candidate(self):
+        cfg = self.config.current.model_copy(deep=True)
+        if cfg.automation.paused or not cfg.proactive.enabled or not cfg.proactive.auto_drafts:
+            return
+        connected = self.s.qq_transport.connected() if self.s.qq_transport else []
+        day = BudgetService(self.db, self.clock).day(cfg)
+        selected = None
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if (
+                db.execute(
+                    "SELECT COUNT(*) FROM proactive_draft_runs WHERE day=?", (day,)
+                ).fetchone()[0]
+                >= cfg.proactive.max_auto_drafts_per_day
+            ):
+                return
+            for contact in db.execute(
+                "SELECT bot_id,user_id FROM proactive_contacts WHERE opted_in=1 AND user_paused=0 AND admin_blocked=0 ORDER BY updated_at LIMIT 100"
+            ).fetchall():
+                if contact["bot_id"] not in connected or self.reason(db, contact):
+                    continue
+                if db.execute(
+                    "SELECT 1 FROM proactive_draft_runs WHERE day=? AND bot_id=? AND user_id=?",
+                    (day, contact["bot_id"], contact["user_id"]),
+                ).fetchone():
+                    continue
+                if db.execute(
+                    "SELECT 1 FROM proactive_jobs WHERE bot_id=? AND user_id=? AND status IN ('pending_approval','scheduled','waiting','running')",
+                    (contact["bot_id"], contact["user_id"]),
+                ).fetchone():
+                    continue
+                db.execute(
+                    "INSERT INTO proactive_draft_runs VALUES (?,?,?,'generating',?)",
+                    (day, contact["bot_id"], contact["user_id"], self.clock()),
+                )
+                selected = dict(contact)
+                break
+        if not selected:
+            return
+        status = "failed"
+        try:
+            result = await self.s.llm.complete(
+                [
+                    {
+                        "role": "system",
+                        "content": "为已授权主动联系的用户准备一段不超过150字的中文问候。不要声称已发送，不编造现实经历，不公开其它会话事实。若不适合联系只返回 [[SILENT]]。内容仍需主人逐条审批。",
+                    },
+                    {"role": "user", "content": cfg.proactive.draft_topic},
+                ],
+                purpose="proactive",
+                output_limit=256,
+            )
+            now_cfg = self.config.current
+            with self.db.connect() as db:
+                reason = self.reason(db, selected)
+            event = ChatEvent(
+                selected["bot_id"], selected["user_id"], "candidate", "", directed=True
+            )
+            text = result.text.strip()
+            if (
+                reason
+                or now_cfg.proactive != cfg.proactive
+                or now_cfg.personality.owner_qq != cfg.personality.owner_qq
+            ):
+                status = "policy_changed"
+            elif (
+                not text
+                or text == "[[SILENT]]"
+                or len(text) > 1000
+                or result.tool_calls
+                or self.s.memory.private_echo(text, event.scope)
+            ):
+                status = "skipped"
+            else:
+                self.create(
+                    JobCreate(
+                        request_id=uuid4(),
+                        bot_id=selected["bot_id"],
+                        user_id=selected["user_id"],
+                        content=text,
+                        earliest_at=self.clock(),
+                        latest_at=self.clock() + 86400,
+                    )
+                )
+                status = "queued"
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.db.audit("proactive_draft_failed")
+        finally:
+            with self.db.connect() as db:
+                db.execute(
+                    "UPDATE proactive_draft_runs SET status=? WHERE day=? AND bot_id=? AND user_id=?",
+                    (status, day, selected["bot_id"], selected["user_id"]),
+                )
+
     async def tick(self):
         async with self.lock:
+            await self.create_ai_candidate()
 
             def due():
                 with self.db.connect() as db:

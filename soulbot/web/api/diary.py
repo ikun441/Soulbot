@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from soulbot.core.social_state import StateConflict
+from soulbot.services.diary_periods import DiaryDelivery, PolishDiary, WeeklyDiary
 from soulbot.services.diary_service import DiaryEdit, GenerateDiary
 
 
@@ -42,6 +43,37 @@ def install_diary_api(app, s, authorized):
         return call(
             lambda: s.diary.generate(data.day, include_current_day=data.include_current_day)
         )
+
+    @app.get("/api/diaries/weekly", dependencies=protected)
+    def summaries():
+        return s.periods.summaries()
+
+    @app.post("/api/diaries/weekly", dependencies=protected)
+    def weekly(data: WeeklyDiary):
+        return call(lambda: s.periods.generate_week(data.day))
+
+    @app.delete("/api/diaries/weekly/{key}", dependencies=protected)
+    def remove_weekly(key: int):
+        with s.db.connect() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO diary_summary_deleted SELECT scope,week_start FROM diary_summaries WHERE id=?",
+                (key,),
+            )
+            db.execute("DELETE FROM diary_summaries WHERE id=?", (key,))
+        return {"ok": True}
+
+    @app.post("/api/diaries/delivery", dependencies=protected)
+    def delivery(data: DiaryDelivery):
+        return call(lambda: s.periods.delivery(data.kind, data.day))
+
+    @app.post("/api/diaries/{key}/polish", dependencies=protected)
+    async def polish(key: int, data: PolishDiary):
+        try:
+            return await s.periods.polish(key, data)
+        except LookupError:
+            raise HTTPException(404, "日记不存在") from None
+        except ValueError:
+            raise HTTPException(422, "未能生成有效表达，事实层未改变") from None
 
     @app.get("/api/diaries/{key}", dependencies=protected)
     def detail(key: int):

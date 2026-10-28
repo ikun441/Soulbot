@@ -322,7 +322,7 @@ def test_version_consistency():
 
     root = Path(__file__).resolve().parents[1]
     assert VERSION == "v" + __version__
-    assert f"## {VERSION} - " in (root / "docs/version.md").read_text()
+    assert f"## {VERSION} - " in (root / "docs/version.me").read_text()
     metadata = tomllib.loads((root / "pyproject.toml").read_text())
     assert metadata["tool"]["setuptools"]["dynamic"]["version"]["attr"] == "soulbot.__version__"
 

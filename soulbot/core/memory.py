@@ -219,6 +219,78 @@ class MemoryEngine:
             capture_scope=event.scope,
         )
 
+    def recall(self, query="", offset=0, limit=10):
+        """Internal cross-scope recall explicitly enabled by the administrator; paginated, never grants rights."""
+        if not self.config.current.memory.enabled or not self.config.current.memory.global_context:
+            return {"items": [], "total": 0}
+        with self.db.connect() as db:
+            self.expire(db)
+            rows = db.execute(
+                """SELECT m.* FROM memories m
+                LEFT JOIN memory_preferences p ON p.scope=(CASE WHEN m.group_id='' THEN m.bot_id||':p:'||m.user_id ELSE m.bot_id||':g:'||m.group_id||':u:'||m.user_id END)
+                WHERE m.status='approved' AND m.long_term_allowed=1
+                AND (m.expires_at IS NULL OR m.expires_at>?) AND COALESCE(p.enabled,1)=1
+                ORDER BY m.importance DESC,m.confidence DESC,m.updated_at DESC""",
+                (self.clock(),),
+            ).fetchall()
+        terms = set(
+            re.findall(
+                r"[a-z0-9]+|[\u4e00-\u9fff]{1,2}", unicodedata.normalize("NFKC", query).casefold()
+            )
+        )
+        ranked = sorted(
+            rows,
+            key=lambda row: sum(
+                term in unicodedata.normalize("NFKC", row["content"]).casefold() for term in terms
+            ),
+            reverse=True,
+        )
+        return {
+            "total": len(ranked),
+            "items": [
+                {
+                    "id": r["id"],
+                    "content": r["content"],
+                    "kind": r["kind"],
+                    "importance": r["importance"],
+                    "confidence": r["confidence"],
+                    "visibility": "group" if r["group_id"] else "private",
+                    "source_scope": f"{r['bot_id']}:g:{r['group_id']}:u:{r['user_id']}"
+                    if r["group_id"]
+                    else f"{r['bot_id']}:p:{r['user_id']}",
+                }
+                for r in ranked[offset : offset + limit]
+            ],
+        }
+
+    def action_context(self, query=""):
+        policy = self.config.current.memory
+        result = []
+        for item in self.recall(query, limit=policy.max_items)["items"]:
+            if len(json.dumps([*result, item], ensure_ascii=False)) <= policy.max_chars:
+                result.append(item)
+        return result
+
+    def private_echo(self, text, scope=None):
+        """Additional literal disclosure guard; semantic paraphrases still require model privacy rules."""
+        normalized = "".join(unicodedata.normalize("NFKC", text).casefold().split())
+        with self.db.connect() as db:
+            rows = db.execute(
+                "SELECT bot_id,user_id,group_id,content FROM memories WHERE long_term_allowed=1 AND status='approved'"
+            ).fetchall()
+        for row in rows:
+            source = (
+                f"{row['bot_id']}:g:{row['group_id']}:u:{row['user_id']}"
+                if row["group_id"]
+                else f"{row['bot_id']}:p:{row['user_id']}"
+            )
+            if source == scope:
+                continue
+            content = "".join(unicodedata.normalize("NFKC", row["content"]).casefold().split())
+            if len(content) >= 8 and content in normalized:
+                return True
+        return False
+
     def retrieve(self, event):
         if not self.permitted(event):
             return []

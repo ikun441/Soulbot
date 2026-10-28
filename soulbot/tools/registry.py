@@ -27,13 +27,17 @@ class ToolContext:
     total: int = 0
     max_total: int = 5
     scope: str | None = None
+    event: object | None = None
     purpose: str = "explicit"
+    approved_tools: frozenset[str] = frozenset()
 
 
 class ToolRegistry:
     def __init__(self, permissions: PermissionEngine, audit):
         self.permissions, self.audit = permissions, audit
         self.tools: dict[str, Tool] = {}
+        self.argument_guard = None
+        self.approval_queue = None
 
     def register(self, tool: Tool):
         if tool.name in self.tools or tool.timeout <= 0 or tool.max_calls < 1:
@@ -44,12 +48,23 @@ class ToolRegistry:
         if name not in self.tools:
             raise LookupError("工具未注册")
         tool = self.tools[name]
-        self.permissions.require(name)
+        queued = False
+        try:
+            self.permissions.require(name, approved=name in context.approved_tools)
+        except PermissionError:
+            if self.approval_queue and self.permissions.policies.get(name) == "approval":
+                queued = True
+            else:
+                raise
         validated = tool.schema.model_validate(arguments)
+        if self.argument_guard:
+            self.argument_guard(name, validated, context)
         if context.total >= context.max_total or context.calls.get(name, 0) >= tool.max_calls:
             raise PermissionError("工具调用次数已达上限")
         context.total += 1
         context.calls[name] = context.calls.get(name, 0) + 1
+        if queued:
+            return self.approval_queue(name, validated, context)
         self.audit("tool_started", name)
         try:
             operation = (

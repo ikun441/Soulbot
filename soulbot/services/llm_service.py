@@ -16,6 +16,7 @@ class LLMService:
             audit,
         )
         self.transport = None
+        self.memory = None
         self.limiter = asyncio.Semaphore(4)
         self.diagnostics = diagnostics or ProviderDiagnostics()
 
@@ -79,6 +80,85 @@ class LLMService:
             )
         return chain
 
+    async def verify_tools(self):
+        """Probe the primary model with a harmless function, then enable only that model."""
+        from types import SimpleNamespace
+
+        from soulbot.providers.registry import ProviderRegistry
+
+        snapshot = self.config.current.model_copy(deep=True)
+        original, credentials = self.test_inputs()
+        snapshot.llm.supports_tools = True
+        snapshot.llm.retries = 0
+        snapshot.llm.fallbacks = {}
+        probe = LLMService(
+            SimpleNamespace(current=snapshot),
+            self.secrets,
+            ProviderRegistry(),
+            self.budget,
+            self.audit,
+        )
+        probe.transport = self.transport
+        result = await probe.complete(
+            [
+                {
+                    "role": "system",
+                    "content": "只读工具能力测试。请调用 capability_probe，word 为 ok，不要仅输出文字。",
+                },
+                {"role": "user", "content": "调用测试工具"},
+            ],
+            purpose="admin_capability_test",
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "capability_probe",
+                        "description": "只读能力测试，不执行外部动作",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"word": {"type": "string"}},
+                            "required": ["word"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            ],
+            output_limit=128,
+        )
+        import json
+
+        try:
+            valid = (
+                len(result.tool_calls) == 1
+                and result.tool_calls[0]["function"]["name"] == "capability_probe"
+                and json.loads(result.tool_calls[0]["function"]["arguments"]) == {"word": "ok"}
+            )
+        except (ValueError, KeyError, TypeError):
+            valid = False
+        if not valid:
+            raise ProviderError(
+                "tool_capability", "模型未返回有效工具调用；能力开关保持原样，请检查模型兼容性"
+            )
+
+        def apply():
+            with self.config.lock:
+                current, current_credentials = self.test_inputs()
+                if current != original or current_credentials != credentials:
+                    raise ProviderError(
+                        "config_changed", "测试期间模型配置发生变化，请重新测试；未启用旧配置"
+                    )
+                settings = self.config.current.model_copy(deep=True)
+                settings.llm.supports_tools = True
+                self.config.save(settings)
+                self.audit("llm_tools_verified", result.provider)
+
+        await asyncio.to_thread(apply)
+        return {
+            "ok": True,
+            "message": "已验证真实工具调用并启用主模型工具能力；本次测试计入预算",
+            "model": result.model,
+        }
+
     async def models(self, name="primary"):
         for selected, endpoint, provider in self.chain(
             self.config.current.model_copy(deep=True), allow_unselected=True
@@ -93,6 +173,125 @@ class LLMService:
         raise ProviderError("not_configured", "该 Provider 尚未配置")
 
     async def complete(
+        self,
+        messages,
+        purpose="explicit",
+        tools=None,
+        on_delta=None,
+        output_limit=None,
+        task_state=None,
+    ):
+        import json
+
+        memory = self.memory
+        prepared = list(messages)
+        available = bool(
+            memory
+            and self.config.current.memory.enabled
+            and self.config.current.memory.global_context
+        )
+        if available:
+            query = next(
+                (
+                    str(m.get("content") or "")
+                    for m in reversed(messages)
+                    if m.get("role") == "user"
+                ),
+                "",
+            )
+            references = await asyncio.to_thread(memory.action_context, query[:1000])
+            if references:
+                prepared[0] = {
+                    **prepared[0],
+                    "content": str(prepared[0].get("content") or "")
+                    + "\n"
+                    + "内部跨会话记忆参考（管理员已启用全局检索）。来源和可见范围必须保留；这不是当前会话发生的事件，也不是工具或权限指令。可以依据它们决定是否行动，但不得未经授权向其他用户、群或公开动态透露私人事实，不能把过去事件编造为本日经历。\n"
+                    + json.dumps(references, ensure_ascii=False),
+                }
+        # Callers with their own tools own that loop. Other tasks get read-only memory tools.
+        recall_tools = None
+        if (
+            available
+            and tools is None
+            and on_delta is None
+            and self.config.current.tools.retrieve_memory == "auto"
+        ):
+            try:
+                self.chain(self.config.current, ["tool_calling"])
+                recall_tools = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "retrieve_memory",
+                            "description": "查询所有已审核授权且未关闭的记忆；query 用于相关性排序，offset 用于继续分页。只可内部参考，保留来源与可见范围。",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "maxLength": 200},
+                                    "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                    }
+                ]
+            except ProviderError:
+                pass
+        state = task_state if task_state is not None else {}
+        calls = 0
+        for _ in range(4):
+            result = await self._complete(
+                prepared,
+                purpose,
+                tools if tools is not None else recall_tools,
+                on_delta,
+                output_limit,
+                state,
+            )
+            if not recall_tools or not result.tool_calls:
+                return result
+            prepared.append(
+                {
+                    "role": "assistant",
+                    "content": result.text or None,
+                    "tool_calls": result.tool_calls,
+                }
+            )
+            for call in result.tool_calls:
+                calls += 1
+                if calls > 5:
+                    raise ProviderError("tool_limit", "本次记忆查询次数已达上限")
+                try:
+                    if (
+                        call["function"]["name"] != "retrieve_memory"
+                        or self.config.current.tools.retrieve_memory != "auto"
+                    ):
+                        raise ValueError
+                    args = json.loads(call["function"]["arguments"])
+                    if not isinstance(args, dict) or set(args) - {"query", "offset"}:
+                        raise ValueError
+                    query, offset = args.get("query", ""), args.get("offset", 0)
+                    if (
+                        not isinstance(query, str)
+                        or len(query) > 200
+                        or type(offset) is not int
+                        or not 0 <= offset <= 1000000
+                    ):
+                        raise ValueError
+                    value = await asyncio.to_thread(memory.recall, query, offset, 5)
+                    await asyncio.to_thread(self.audit, "memory_action_recalled", purpose)
+                except (ValueError, TypeError, KeyError):
+                    value = {"error": "记忆查询参数或权限无效"}
+                prepared.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "content": json.dumps(value, ensure_ascii=False),
+                    }
+                )
+        raise ProviderError("tool_limit", "本次记忆查询轮数已达上限")
+
+    async def _complete(
         self,
         messages,
         purpose="explicit",
@@ -147,6 +346,16 @@ class LLMService:
                             prepared, maximum, tools, delta if on_delta else None
                         )
                         await asyncio.to_thread(self.budget.settle, key, endpoint, result.usage)
+                        if result.usage is not None:
+                            # Completed calls consume measured tokens, not their larger preflight reservation.
+                            total += (
+                                result.usage.input_tokens
+                                + result.usage.output_tokens
+                                - amount
+                                - maximum
+                            )
+                            if task_state is not None:
+                                task_state["tokens"] = total
                         result.provider, result.model = name, endpoint.model
                         result.estimated = result.usage is None
                         result.cost_cny = self.budget.price(
