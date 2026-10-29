@@ -298,7 +298,7 @@ def test_agent_selects_emoji_through_tools_and_rechecks_permission(services, rev
         assert isinstance(sent[0], ImagePayload) and sent[0].data == png()
 
 
-def test_tool_turns_share_task_budget(services):
+def test_tool_turns_share_token_tracking_without_budget_rejection(services):
     services.config.current.llm.model = "fixture"
     services.config.current.llm.retries = 0
     services.config.current.limits.max_per_agent_task = 1000
@@ -322,17 +322,22 @@ def test_tool_turns_share_task_budget(services):
         messages = [{"role": "user", "content": "hello"}]
         await services.llm.complete(messages, task_state=state)
         assert state["tokens"] == 601
-        with pytest.raises(ProviderError, match="本次任务"):
-            await services.llm.complete(messages, task_state=state)
+        await services.llm.complete(messages, task_state=state)
+        assert state["tokens"] == 1202
 
     asyncio.run(check())
-    assert len(requests) == 1
+    assert len(requests) == 2
+    assert any(
+        item["code"] == "task_tokens"
+        for item in services.budget.summary(services.config.current)["recent_warnings"]
+    )
 
 
 def test_tool_schema_is_counted_before_provider_request(services):
     services.config.current.llm.model = "fixture"
     services.config.current.llm.supports_tools = True
     services.config.current.limits.max_input_per_request = 256
+    services.config.current.llm.context_window = 1024
     services.secrets.save({"llm_api_key": "fixture"})
     specs = [
         {

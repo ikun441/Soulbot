@@ -168,10 +168,14 @@ class QZoneService:
                 ],
             }
 
-    async def create(self, data, *, autonomous=False):
+    async def create(self, data, *, autonomous=False, from_chat=False):
         fingerprint = self.digest(data.model_dump(mode="json"))
+        if from_chat and (autonomous or data.mode != "manual"):
+            raise ValueError("QQ 工具只能保存已经提供正文的草稿")
         source = (
-            "autonomous_public_topic"
+            "model_chat_draft"
+            if from_chat
+            else "autonomous_public_topic"
             if autonomous
             else "ai_public_topic"
             if data.mode == "ai"

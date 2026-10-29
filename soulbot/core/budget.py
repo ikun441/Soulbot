@@ -1,11 +1,12 @@
 """Persistent reservation before every billable attempt, including tests and fallbacks."""
 
+import json
 import time
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from soulbot.providers.llm.base import ProviderError, Usage
+from soulbot.providers.llm.base import Usage
 
 
 class BudgetService:
@@ -39,31 +40,55 @@ class BudgetService:
             + output_tokens * endpoint.output_price_cny_per_million
         ) / 1000000
 
-    def reserve(self, settings, endpoint, provider, purpose, input_tokens, output_tokens):
+    def alerts(self, db, settings, day, *, input_tokens=0, task_tokens=0):
+        cost, unknown = self.cost_totals(db, day)
+        tokens = db.execute(
+            "SELECT COALESCE(SUM(input_tokens+output_tokens),0) FROM llm_usage WHERE day=?", (day,)
+        ).fetchone()[0]
+        alerts = []
+        for code, value, threshold in (
+            ("daily_tokens", tokens, settings.behavior.daily_tokens),
+            ("daily_cost", cost, settings.behavior.daily_cost_cny),
+            ("request_input", input_tokens, settings.limits.max_input_per_request),
+            ("task_tokens", task_tokens, settings.limits.max_per_agent_task),
+        ):
+            if value >= threshold * settings.behavior.budget_warning_ratio:
+                alerts.append(
+                    {
+                        "code": code,
+                        "value": value,
+                        "threshold": threshold,
+                        "severity": "exceeded" if value >= threshold else "near",
+                    }
+                )
+        if unknown:
+            alerts.append(
+                {"code": "unknown_cost", "value": unknown, "threshold": None, "severity": "unknown"}
+            )
+        return alerts
+
+    def record_warnings(self, db, settings, *, day=None, input_tokens=0, task_tokens=0):
+        day = day or self.day(settings)
+        for alert in self.alerts(
+            db, settings, day, input_tokens=input_tokens, task_tokens=task_tokens
+        ):
+            key = f"budget_warning:{day}:{alert['code']}:{alert['severity']}"
+            value = {**alert, "day": day, "created_at": self.clock(), "warning_only": True}
+            if db.execute(
+                "INSERT OR IGNORE INTO metadata VALUES (?,?)", (key, json.dumps(value))
+            ).rowcount:
+                db.execute(
+                    "INSERT INTO audit(action,detail) VALUES ('budget_warning',?)",
+                    (alert["code"] + ":" + alert["severity"],),
+                )
+
+    def reserve(
+        self, settings, endpoint, provider, purpose, input_tokens, output_tokens, *, task_tokens=0
+    ):
         day = self.day(settings)
         price = self.price(endpoint, input_tokens, output_tokens)
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute(
-                "SELECT COALESCE(SUM(input_tokens+output_tokens),0) AS tokens, COALESCE(SUM(cost_cny),0) AS cost, SUM(CASE WHEN cost_cny IS NULL AND status!='rejected' THEN 1 ELSE 0 END) AS unknown FROM llm_usage WHERE day=?",
-                (day,),
-            ).fetchone()
-            if row["tokens"] + input_tokens + output_tokens > settings.behavior.daily_tokens:
-                raise ProviderError("budget", "今日 Token 额度不足，已停止模型调用")
-            cost, unknown = self.cost_totals(db, day)
-            if cost >= settings.behavior.daily_cost_cny or (
-                price is not None and cost + price > settings.behavior.daily_cost_cny
-            ):
-                raise ProviderError("budget", "今日费用预算不足，已停止模型调用")
-            if purpose in {
-                "proactive",
-                "qzone_autonomous",
-                "exploration",
-                "diary_polish_auto",
-            } and (price is None or unknown):
-                raise ProviderError(
-                    "unknown_cost", "存在未知费用，已暂停主动模型调用；请配置价格并核对账单"
-                )
             key = uuid.uuid4().hex
             db.execute(
                 "INSERT INTO llm_usage(id,day,provider,model,purpose,status,input_tokens,output_tokens,cost_cny,created_at) VALUES (?,?,?,?,?,'pending',?,?,?,?)",
@@ -78,6 +103,9 @@ class BudgetService:
                     price,
                     self.clock(),
                 ),
+            )
+            self.record_warnings(
+                db, settings, day=day, input_tokens=input_tokens, task_tokens=task_tokens
             )
         return key
 
@@ -155,7 +183,22 @@ class BudgetService:
             image_today = db.execute(
                 "SELECT COUNT(*),COALESCE(SUM(images),0) FROM image_usage WHERE day=?", (day,)
             ).fetchone()
+            alerts = self.alerts(db, settings, day)
+            warning_history = []
+            for row in db.execute(
+                "SELECT value FROM metadata WHERE key LIKE ?", (f"budget_warning:{day}:%",)
+            ):
+                try:
+                    warning_history.append(json.loads(row[0]))
+                except (ValueError, TypeError):
+                    continue
         return {
+            "warning_only": True,
+            "warning_ratio": settings.behavior.budget_warning_ratio,
+            "warnings": alerts,
+            "recent_warnings": sorted(
+                warning_history, key=lambda item: item.get("created_at", 0), reverse=True
+            )[:20],
             "day": day,
             "providers": rows,
             "recent": recent,

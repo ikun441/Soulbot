@@ -162,13 +162,13 @@ def test_budget_unknown_cost_is_reserved_and_persisted(tmp_path):
     assert result["reserved_or_used_tokens"] == 150
     assert result["unknown_cost_calls"] == 1
     assert result["known_or_estimated_cost_cny"] == 0
-    with pytest.raises(ProviderError, match="未知费用"):
-        budget.reserve(config, config.llm, "primary", "proactive", 100, 50)
+    assert budget.reserve(config, config.llm, "primary", "proactive", 100, 50)
+    assert any(item["code"] == "unknown_cost" for item in budget.summary(config)["warnings"])
     restarted = BudgetService(Database(tmp_path / "data" / "soulbot.db"))
-    assert restarted.summary(config)["unknown_cost_calls"] == 1
+    assert restarted.summary(config)["unknown_cost_calls"] == 2
 
 
-def test_concurrent_budget_reservations_cannot_overspend_tokens(tmp_path):
+def test_concurrent_usage_over_threshold_is_recorded_without_blocking(tmp_path):
     db = Database(tmp_path / "data" / "soulbot.db")
     config = Settings()
     config.behavior.daily_tokens = 1000
@@ -182,9 +182,12 @@ def test_concurrent_budget_reservations_cannot_overspend_tokens(tmp_path):
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         result = list(pool.map(reserve, (1, 2)))
-    assert sum(value != "budget" for value in result) == 1
-    assert result.count("budget") == 1
-    assert budget.summary(config)["reserved_or_used_tokens"] == 700
+    assert len(set(result)) == 2 and "budget" not in result
+    assert budget.summary(config)["reserved_or_used_tokens"] == 1400
+    assert any(
+        item["code"] == "daily_tokens" and item["severity"] == "exceeded"
+        for item in budget.summary(config)["warnings"]
+    )
 
 
 def test_llm_service_falls_back_only_to_configured_provider(tmp_path):

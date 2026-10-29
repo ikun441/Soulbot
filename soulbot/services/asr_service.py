@@ -70,11 +70,6 @@ class ASRService:
                 or row[1] + seconds > policy.max_seconds_per_day
             ):
                 raise ASRError("quota", "识别频率或今日音频秒数额度已达上限")
-            used, _ = self.budget.cost_totals(db, day)
-            if used >= settings.behavior.daily_cost_cny or (
-                cost is not None and used + cost > settings.behavior.daily_cost_cny
-            ):
-                raise ASRError("budget", "今日共享费用预算不足，已停止识别")
             key = uuid.uuid4().hex
             db.execute(
                 "INSERT INTO asr_usage VALUES (?,?,?,?,?,'pending',?,?,?,NULL)",
@@ -89,6 +84,7 @@ class ASRService:
                     now,
                 ),
             )
+            self.budget.record_warnings(db, settings, day=day)
         return key
 
     def finish(self, key, status, kind=None):

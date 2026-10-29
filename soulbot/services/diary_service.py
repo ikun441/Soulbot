@@ -205,7 +205,9 @@ class DiaryService:
             "last_auto_run": dict(last) if last else None,
         }
 
-    def generate(self, day, *, automatic=False, include_current_day=False):
+    def generate(self, day, *, automatic=False, include_current_day=False, scope=None):
+        if automatic and scope is not None:
+            raise ValueError("自动归档不能只处理一个会话")
         target = date.fromisoformat(day)
         policy = self.config.current.diary
         if not policy.enabled:
@@ -240,8 +242,9 @@ class DiaryService:
                 SUM(CASE WHEN kind='qzone' THEN 1 ELSE 0 END) AS qzone_posts,
                 MIN(occurred_at) AS first_event_at,MAX(occurred_at) AS last_event_at
                 FROM diary_events e LEFT JOIN diary_preferences p ON e.scope=p.scope
-                WHERE occurred_at>=? AND occurred_at<? AND COALESCE(p.enabled,1)=1 GROUP BY e.scope""",
-                (start, end),
+                WHERE occurred_at>=? AND occurred_at<? AND COALESCE(p.enabled,1)=1
+                AND (? IS NULL OR e.scope=?) GROUP BY e.scope""",
+                (start, end, scope, scope),
             ).fetchall()
             for row in groups:
                 previous = db.execute(
@@ -325,6 +328,32 @@ class DiaryService:
             "already_processed": False,
             "updated": updated,
             "is_final": is_final,
+        }
+
+    def create_for_event(self, event, day=None):
+        """Create only this QQ scope from confirmed facts, without arbitrary model prose."""
+        day = day or self.today().isoformat()
+        outcome = self.generate(day, include_current_day=True, scope=event.scope)
+        with self.db.connect() as db:
+            row = db.execute(
+                "SELECT d.* FROM diaries d LEFT JOIN diary_preferences p ON d.scope=p.scope "
+                "WHERE d.scope=? AND d.day=? AND COALESCE(p.enabled,1)=1",
+                (event.scope, day),
+            ).fetchone()
+        if not row:
+            return {
+                "status": "skipped",
+                "day": day,
+                "message": "本会话未达到真实活动门槛或已关闭日记，没有生成日记；不能编造经历。",
+            }
+        return {
+            "status": "saved",
+            "diary_id": row["id"],
+            "day": day,
+            "is_final": bool(row["is_final"]),
+            "facts": json.loads(row["facts_json"]),
+            "created": bool(outcome["created"]),
+            "message": f"已保存本会话 {day} 的本地日记（ID {row['id']}），仅基于已确认活动；未向其他会话推送或公开发布。",
         }
 
     def listing(self, query="", day="", offset=0, limit=30):

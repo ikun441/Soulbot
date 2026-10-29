@@ -67,19 +67,13 @@ class TTSService:
                 or row["chars"] + len(text) > policy.max_chars_per_day
             ):
                 raise SpeechError("quota", "语音调用频率或今日字符额度已达上限")
-            used, unknown = self.budget.cost_totals(db, day)
-            if used >= settings.behavior.daily_cost_cny or (
-                cost is not None and used + cost > settings.behavior.daily_cost_cny
-            ):
-                raise SpeechError("budget", "今日费用预算不足，已停止语音生成")
-            if purpose == "proactive" and (cost is None or unknown):
-                raise SpeechError("unknown_cost", "存在未知费用，已暂停主动语音生成")
             key = uuid.uuid4().hex
             model = policy.edge.voice if policy.provider == "edge" else policy.compatible.model
             db.execute(
                 "INSERT INTO tts_usage VALUES (?,?,?,?,?,'pending',?,?,?,NULL)",
                 (key, day, policy.provider, model, purpose, len(text), cost, now),
             )
+            self.budget.record_warnings(db, settings, day=day)
         return key
 
     def finish(self, key, status, kind=None):

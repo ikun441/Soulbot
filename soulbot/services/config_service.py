@@ -198,6 +198,7 @@ class Behavior(Model):
     diary: bool = False
     qzone: bool = False
     quiet_hours: bool = True
+    budget_warning_ratio: float = Field(default=0.8, ge=0.1, le=1, allow_inf_nan=False)
     daily_tokens: int = Field(default=300000, ge=1000, le=10000000)
     daily_cost_cny: float = Field(default=5, gt=0, le=10000, allow_inf_nan=False)
 
@@ -304,6 +305,9 @@ class MemeSettings(Model):
 
 
 class MediaToolPolicies(Model):
+    discover_tools: Literal["deny", "auto"] = "auto"
+    create_diary: Literal["deny", "auto", "approval"] = "auto"
+    create_qzone_draft: Literal["deny", "auto", "approval"] = "auto"
     search_web: Literal["deny", "auto", "approval"] = "auto"
     browse_memory: Literal["deny", "auto", "approval"] = "auto"
     retrieve_memory: Literal["deny", "auto", "approval"] = "auto"
@@ -393,6 +397,7 @@ class ASRSettings(Model):
 
 
 class ComfySettings(Model):
+    tool_prompt_language: Literal["en", "native"] = "en"
     base_url: str = "http://127.0.0.1:8188"
     checkpoint: str = Field(default="", max_length=300)
     negative_prompt: str = Field(default="text, watermark, low quality", max_length=1000)

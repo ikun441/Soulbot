@@ -99,13 +99,6 @@ class ImageGenerationService:
             ).fetchone()[0]
             if count >= policy.max_images_per_day or recent >= policy.max_calls_per_minute:
                 raise ImageGenerationError("quota", "生图频率或今日图片额度已达上限")
-            used, unknown = self.budget.cost_totals(db, day)
-            if used >= settings.behavior.daily_cost_cny or (
-                cost is not None and used + cost > settings.behavior.daily_cost_cny
-            ):
-                raise ImageGenerationError("budget", "今日共享费用预算不足，已停止生图")
-            if purpose == "proactive" and (cost is None or unknown):
-                raise ImageGenerationError("unknown_cost", "存在未知费用，已暂停主动生图")
             key = uuid.uuid4().hex
             db.execute(
                 "INSERT INTO image_usage VALUES (?,?,?,?,?,'pending',1,?,?,NULL)",
@@ -119,6 +112,7 @@ class ImageGenerationService:
                     now,
                 ),
             )
+            self.budget.record_warnings(db, settings, day=day)
         return key
 
     def finish(self, key, status, kind=None):

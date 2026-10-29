@@ -120,18 +120,18 @@ def test_exploration_disabled_unknown_cost_paused_and_deduplicated(s):
     s.config.current.exploration.enabled = True
     s.config.current.search.price_cny_per_request = None
     asyncio.run(s.search.tick())
-    assert s.search.notes()["state"]["status"] == "unknown_cost"
-    assert not s.search.notes()["items"]
+    assert s.search.notes()["state"]["status"] == "completed"
+    assert len(s.search.notes()["items"]) == 1
     s.now[0] += 3 * 3600
     s.config.current.search.price_cny_per_request = 0
     asyncio.run(s.search.tick())
-    assert len(s.search.notes()["items"]) == 1
+    assert len(s.search.notes()["items"]) == 2
     asyncio.run(s.search.tick())
-    assert len(s.search.notes()["items"]) == 1
+    assert len(s.search.notes()["items"]) == 2
     s.config.current.automation.paused = True
     s.now[0] += 3 * 3600
     asyncio.run(s.search.tick())
-    assert len(s.search.notes()["items"]) == 1
+    assert len(s.search.notes()["items"]) == 2
 
 
 def test_exploration_rechecks_policy_after_slow_search(s):

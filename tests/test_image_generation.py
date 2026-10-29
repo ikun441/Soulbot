@@ -12,10 +12,7 @@ from pydantic import ValidationError
 
 from soulbot.app import build_services, create_web_app
 from soulbot.core.events import ChatEvent
-from soulbot.providers.asr.base import ASRError
 from soulbot.providers.image.base import ImageGenerationError
-from soulbot.providers.llm.base import ProviderError
-from soulbot.providers.tts.base import SpeechError
 from soulbot.services.config_service import ImageGenerationSettings
 from soulbot.services.media_service import MediaError
 from soulbot.tools.media_tools import specifications
@@ -267,21 +264,20 @@ def test_api_auth_preview_private_prompt_not_in_logs_or_usage(services, tmp_path
         assert "api_key" not in client.get("/api/image/status").text
 
 
-def test_shared_budget_and_unknown_cost_stop_optional_calls(services):
+def test_shared_cost_and_unknown_price_warn_without_stopping_calls(services):
     enable(services)
     settings = services.config.current
-    with pytest.raises(ImageGenerationError, match="未知费用"):
-        asyncio.run(services.images.generate("proactive", "proactive"))
+    assert asyncio.run(services.images.generate("proactive", "proactive")).data == png()
     settings.image_generation.price_cny_per_image = 1
     settings.behavior.daily_cost_cny = 1
     key = services.images.reserve(settings, "fixture")
     services.images.finish(key, "completed")
-    with pytest.raises(ProviderError, match="费用预算"):
-        services.budget.reserve(settings, settings.llm, "primary", "explicit", 1, 1)
-    with pytest.raises(SpeechError, match="费用预算"):
-        services.speech.reserve(settings, "test", "explicit")
-    with pytest.raises(ASRError, match="费用预算"):
-        services.recognition.reserve(settings, 0.1, "explicit")
+    assert services.budget.reserve(settings, settings.llm, "primary", "explicit", 1, 1)
+    assert services.speech.reserve(settings, "test", "explicit")
+    assert services.recognition.reserve(settings, 0.1, "explicit")
+    assert any(
+        item["code"] == "daily_cost" for item in services.budget.summary(settings)["warnings"]
+    )
 
 
 def test_cancellation_concurrency_persistence_and_daily_limit(services, monkeypatch, tmp_path):
@@ -384,15 +380,14 @@ def test_schema_six_migration_preserves_admin_session_and_existing_usage(service
     )
 
 
-def test_unknown_image_cost_blocks_proactive_llm(services):
+def test_unknown_image_cost_does_not_block_proactive_llm(services):
     enable(services)
     settings = services.config.current
     key = services.images.reserve(settings, "fixture")
     services.images.finish(key, "completed")
     settings.llm.input_price_cny_per_million = 0
     settings.llm.output_price_cny_per_million = 0
-    with pytest.raises(ProviderError, match="未知费用"):
-        services.budget.reserve(settings, settings.llm, "primary", "proactive", 1, 1)
+    assert services.budget.reserve(settings, settings.llm, "primary", "proactive", 1, 1)
     assert services.budget.summary(settings)["unknown_cost_calls"] == 1
 
 

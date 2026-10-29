@@ -61,19 +61,13 @@ class SearchService:
                 >= settings.exploration.max_daily_tasks
             ):
                 raise ProviderError("rate_limit", "今日探索次数已用尽")
-            cost, unknown = BudgetService.cost_totals(db, day)
             price = policy.price_cny_per_request
-            if cost >= settings.behavior.daily_cost_cny or (
-                price is not None and cost + price > settings.behavior.daily_cost_cny
-            ):
-                raise ProviderError("budget", "今日共享费用预算不足")
-            if purpose == "exploration" and (price is None or unknown):
-                raise ProviderError("unknown_cost", "价格或已有用量未知，暂停自主探索")
             key = uuid4().hex
             db.execute(
                 "INSERT INTO search_usage VALUES (?,?,?,'pending',?,?)",
                 (key, day, purpose, price, now),
             )
+            self.s.budget.record_warnings(db, settings, day=day)
         return key
 
     def finish(self, key, status):

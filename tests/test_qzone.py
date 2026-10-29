@@ -682,12 +682,11 @@ def test_autonomous_lifecycle_is_idempotent_and_stops(s):
     asyncio.run(run())
 
 
-def test_autonomous_model_budget_rejects_unknown_price_before_usage(s):
-    with pytest.raises(ProviderError) as error:
-        s.budget.reserve(
-            s.config.current, s.config.current.llm, "primary", "qzone_autonomous", 100, 50
-        )
-    assert error.value.kind == "unknown_cost"
+def test_autonomous_unknown_price_warns_but_records_usage(s):
+    assert s.budget.reserve(
+        s.config.current, s.config.current.llm, "primary", "qzone_autonomous", 100, 50
+    )
+    assert s.budget.summary(s.config.current)["unknown_cost_calls"] == 1
     s.config.current.llm.input_price_cny_per_million = 2
     s.config.current.llm.output_price_cny_per_million = 8
     key = s.budget.reserve(

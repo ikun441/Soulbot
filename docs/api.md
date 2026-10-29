@@ -4,7 +4,7 @@
 
 除 bootstrap、首次创建账户和登录外，管理 API 均需有效 Cookie `soulbot_session`。写请求携带 `X-Soulbot-Request: 1`，浏览器 Origin 与 Host 一致。JSON 请求使用 `Content-Type: application/json`，上传用 multipart/form-data。
 
-错误：401 未登录、403 来源或权限、404 不存在、409 修订冲突或重复动作、422 参数/配置、429 频率/预算、502 上游失败。错误不回显密钥和上游原文。编辑携带当前 revision，冲突后刷新，不盲目重试。
+错误：401 未登录、403 来源或权限、404 不存在、409 修订冲突或重复动作、422 参数/配置、429 频率/上游限流、502 上游失败。错误不回显密钥和上游原文。编辑携带当前 revision，冲突后刷新，不盲目重试。
 
 完整配置 Schema：`GET /api/config/schema`；完整实时接口 Schema：`GET /api/openapi.json`，均需登录。配置 PUT 使用完整 Settings，与 WebUI 相同，敏感 Key 仅写 `/api/secrets`，读取只显示是否配置。
 
@@ -29,6 +29,12 @@
 
 摘要推送只创建待审批主动联系任务，不能代替真实 QQ 用户授权。仅汇总主人私聊和机器人空间活动，不包含其他群/私聊内容。自动行为暂停后恢复：读取完整配置，设 automation.paused=false，再 PUT /api/config。
 
+## 预算预警
+
+`GET /api/usage` 返回 `warning_only=true`、`warning_ratio`、当日 `warnings` 与持久的 `recent_warnings`。预警涵盖 daily_tokens、daily_cost、request_input、task_tokens、unknown_cost；同日同种严重程度只记录一次审计。到达阈值或费用未知均继续调用。
+
+兼容保留旧配置名 behavior.daily_tokens / daily_cost_cny、limits.max_input_per_request / max_per_agent_task，仅作为预警阈值；behavior.budget_warning_ratio 默认为 0.8。旧响应 token_limit / cost_limit_cny 也只表示预警阈值。limits.max_output_per_request 仍控制回复长度；模型实际 context_window、工具次数及频率不属于预算开关。
+
 ## 配置字段
 
 | 字段 | 作用 |
@@ -38,13 +44,13 @@
 | personality / emotion / relationships | 人格、连续模拟情绪和会话关系，不能授予动作权限 |
 | memory.enabled / global_context | 记忆总开关及全局动作依据；只含已审核授权、有效且个人未关闭条目，保留 source_scope 与 visibility |
 | memory.max_items / max_chars | 自动上下文条数/字符上限；工具分页可访问所有合格条目 |
-| behavior | 群过滤、聚合、定向连续对话、冷却、免打扰和 Token/费用上限 |
+| behavior | 群过滤、聚合、定向连续对话、冷却、免打扰和 Token/费用预警阈值 |
 | behavior.split_long_replies / reply_sentences_per_message | 超过两句才分段，默认每段2句，最多5段；每段复核权限与速率 |
 | image_generation.provider / comfy | openai_compatible 或 comfyui；本地固定 checkpoint 工作流，不接受任意节点输入 |
 | proactive | 用户 opt-in、待审批队列、持久每日次数和随机时间窗口 |
 | diary | enabled/live_preview/auto_generate/weekly_enabled、generation_time、min_events、fact_retention_days、delivery_mode(manual/daily/weekly)、delivery_bot_id |
 | qzone | enabled/require_approval/autonomous_enabled、auto_bot_id/auto_audience(self/friends/public)/auto_topics；72h 间隔及7天最多2条 |
-| search | SearXNG base_url/enabled/timeout_seconds/max_results/max_calls_per_minute/max_calls_per_day/price_cny_per_request；未知价不当作0 |
+| search | SearXNG base_url/enabled/timeout_seconds/max_results/max_calls_per_minute/max_calls_per_day/price_cny_per_request；未知价不当作0，不暂停调用 |
 | exploration | enabled/interval_minutes/max_daily_tasks/topics，默认关闭，只存本地 |
 | automation.paused | 统一暂停自主外发、探索和自动日记/推送，不清除用户授权或重置额度 |
 | tools | 工具 deny/auto/approval，模型不能伪造审批；记忆候选还须单独审核 |
@@ -54,10 +60,13 @@
 
 ## 模型工具
 
-每任务最多 5 次工具、4 轮请求，最终最多 2 个媒体附件。所有参数经过 Schema 校验；会话身份由服务端提供，模型不能指定他人身份。生成不等于发送，动作仍须权限与预算复核。
+每任务最多 5 次工具、4 轮请求，最终最多 2 个媒体附件。create_diary 与 create_qzone_draft 每任务最多各调用一次；新工具结果均包含服务端保存回执。所有参数经过 Schema 校验；会话身份由服务端提供，模型不能指定他人身份。生成不等于发送，动作仍须权限与预算复核。
 
 | 工具 | 用途 |
 | --- | --- |
+| discover_tools | `names` 每次最多3个；只从服务端为当前会话提供的工具中载入参数说明，不能授予权限或执行动作 |
+| create_diary | `day` 可选，省略为今天；会话取自服务端，只汇总本会话确认活动，不接受正文或其他身份 |
+| create_qzone_draft | `content`；仅主人私聊，账号和受众取服务端，保存 model_chat_draft 来源，不调用发布接口 |
 | search_web | 公开搜索，不下载结果地址，不执行网页指令 |
 | retrieve_memory / browse_memory | query、offset；全局模式查询所有已审核有效授权记忆并标注来源，关闭全局后限定当前会话 |
 | save_memory | content、importance；仅保存待审核且未授予长期权限的候选 |

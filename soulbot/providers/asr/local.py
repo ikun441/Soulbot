@@ -23,6 +23,8 @@ class LocalASRProvider:
         self.task = None
         self.message = "首次使用请准备本地 Whisper base 模型（约 150MB）"
         self.lock = InstanceLock(self.root / "prepare.lock")
+        if self.ready():
+            self.message = "本地 Whisper base 已准备；识别时不发送录音到云端"
 
     def ready(self):
         try:

@@ -30,6 +30,7 @@ class ToolContext:
     event: object | None = None
     purpose: str = "explicit"
     approved_tools: frozenset[str] = frozenset()
+    available_tools: frozenset[str] = frozenset()
 
 
 class ToolRegistry:

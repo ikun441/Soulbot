@@ -45,8 +45,8 @@ REASONS = {
     "daily_user_limit": "该用户今日主动联系额度已用尽",
     "daily_total_limit": "今日全局主动额度已用尽",
     "cooldown": "尚未达到主动联系最短间隔",
-    "budget": "Token 或费用预算已用尽",
-    "unknown_cost": "存在未知费用，暂停可选主动行为",
+    "budget": "历史预算预警（当前不拦截）",
+    "unknown_cost": "未知费用预警（当前不拦截）",
     "offline": "对应 QQ 机器人尚未连接",
     "dispatching": "已预留额度，正在发送",
     "confirmed": "平台确认发送",
@@ -313,14 +313,6 @@ class ProactiveScheduler:
         ).fetchone()[0]
         if last is not None and now - last < policy.min_interval_minutes * 60:
             return "cooldown"
-        cost, unknown = BudgetService.cost_totals(db, day)
-        tokens = db.execute(
-            "SELECT COALESCE(SUM(input_tokens+output_tokens),0) FROM llm_usage WHERE day=?", (day,)
-        ).fetchone()[0]
-        if cost >= settings.behavior.daily_cost_cny or tokens >= settings.behavior.daily_tokens:
-            return "budget"
-        if unknown:
-            return "unknown_cost"
         return None
 
     def claim(self, key, connected):

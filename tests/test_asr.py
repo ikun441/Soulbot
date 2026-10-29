@@ -13,7 +13,6 @@ from pydantic import ValidationError
 from soulbot.app import build_services, create_web_app
 from soulbot.core.events import ChatEvent
 from soulbot.providers.asr.base import ASRError, Transcription
-from soulbot.providers.llm.base import ProviderError
 from soulbot.services.audio_service import MAX_AUDIO_BYTES, inspect_audio
 from soulbot.services.config_service import ASRSettings, Settings
 from soulbot.services.media_service import MediaError
@@ -190,17 +189,18 @@ def test_cloud_invalid_response_is_uncertain(services, response):
     assert error.value.kind == "format" and error.value.uncertain
 
 
-def test_asr_quota_persists_and_shared_budget_blocks_llm_and_tts(services, tmp_path):
+def test_asr_rate_limit_persists_while_shared_cost_only_warns(services, tmp_path):
     settings = services.config.current
     settings.asr.provider = "openai_compatible"
     settings.asr.price_cny_per_minute = 60
     settings.behavior.daily_cost_cny = 1
     key = services.recognition.reserve(settings, 1, "fixture")
     services.recognition.finish(key, "completed")
-    with pytest.raises(ProviderError, match="费用预算"):
-        services.budget.reserve(settings, settings.llm, "primary", "explicit", 1, 1)
-    with pytest.raises(Exception, match="费用预算"):
-        services.speech.reserve(settings, "tts", "explicit")
+    assert services.budget.reserve(settings, settings.llm, "primary", "explicit", 1, 1)
+    assert services.speech.reserve(settings, "tts", "explicit")
+    assert any(
+        item["code"] == "daily_cost" for item in services.budget.summary(settings)["warnings"]
+    )
     again = build_services(tmp_path)
     again.config.current.asr.max_calls_per_minute = 1
     with pytest.raises(ASRError, match="额度"):
@@ -208,15 +208,14 @@ def test_asr_quota_persists_and_shared_budget_blocks_llm_and_tts(services, tmp_p
     assert again.budget.summary(again.config.current)["asr"]["seconds"] == 1
 
 
-def test_unknown_asr_price_blocks_proactive_llm(services):
+def test_unknown_asr_price_warns_without_blocking_proactive_llm(services):
     settings = services.config.current
     settings.asr.provider = "openai_compatible"
     key = services.recognition.reserve(settings, 1, "fixture")
     services.recognition.finish(key, "completed")
     settings.llm.input_price_cny_per_million = 0
     settings.llm.output_price_cny_per_million = 0
-    with pytest.raises(ProviderError, match="未知费用"):
-        services.budget.reserve(settings, settings.llm, "primary", "proactive", 1, 1)
+    assert services.budget.reserve(settings, settings.llm, "primary", "proactive", 1, 1)
     assert services.budget.summary(settings)["unknown_cost_calls"] == 1
 
 

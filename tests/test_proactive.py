@@ -205,9 +205,14 @@ def test_dynamic_restrictions_pause_before_any_reservation(services, setting, re
                 (None if setting == "unknown" else 5, s.now[0]),
             )
     asyncio.run(s.scheduler.tick())
-    assert not s.sent and by_id(s, row["id"])["reason"] == reason
+    if setting in {"unknown", "budget"}:
+        assert len(s.sent) == 1 and by_id(s, row["id"])["status"] == "sent"
+    else:
+        assert not s.sent and by_id(s, row["id"])["reason"] == reason
     with s.db.connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM proactive_usage").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM proactive_usage").fetchone()[0] == int(
+            setting in {"unknown", "budget"}
+        )
 
 
 def test_time_window_jitter_expiry_and_resume_when_condition_changes(services):

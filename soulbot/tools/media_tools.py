@@ -196,7 +196,7 @@ def register_media_tools(s):
         ("browse_emoji", "分页浏览本地表情，避免读取整个表情库。", BrowseEmoji, browse),
         (
             "select_emoji",
-            "选择检索到的 emoji_id，作为本轮拟发送图片；不能传路径或网址。",
+            "只选择 search_emoji 或 browse_emoji 返回的本地 emoji_id。生成工具返回的 media 附件已经会发送，不要传给此工具；不能传路径或网址。",
             SelectEmoji,
             select,
         ),
@@ -239,7 +239,7 @@ def register_media_tools(s):
         )
 
 
-def specifications(s):
+def specifications(s, event=None):
     config = s.config.current
 
     def compact(value, names=False):
@@ -260,14 +260,32 @@ def specifications(s):
             "type": "function",
             "function": {
                 "name": tool.name,
-                "description": tool.description,
+                "description": tool.description
+                + (
+                    " 当前为本地 ComfyUI，请把用户画面要求准确转换为简洁英文视觉提示词再调用；不要只把中文原文传给模型，不要改变主体（猫与猫娘不同）。"
+                    if tool.name == "generate_image"
+                    and config.image_generation.provider == "comfyui"
+                    and config.image_generation.comfy.tool_prompt_language == "en"
+                    else ""
+                ),
                 "parameters": compact(tool.schema.model_json_schema()),
             },
         }
         for tool in s.tools.tools.values()
         if getattr(config.tools, tool.name, "deny") in {"auto", "approval"}
         and (
-            config.search.enabled
+            True
+            if tool.name == "discover_tools"
+            else config.diary.enabled
+            if tool.name == "create_diary"
+            else config.qzone.enabled
+            and bool(config.personality.owner_qq)
+            and (
+                event is None
+                or (not event.group_id and event.user_id == config.personality.owner_qq)
+            )
+            if tool.name == "create_qzone_draft"
+            else config.search.enabled
             if tool.name == "search_web"
             else config.memory.enabled
             if tool.name in {"retrieve_memory", "browse_memory", "save_memory"}

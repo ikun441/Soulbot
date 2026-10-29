@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from soulbot.app import build_services, create_web_app
 from soulbot.core.events import ChatEvent
-from soulbot.providers.llm.base import ProviderError
 from soulbot.providers.tts.base import SpeechError
 from soulbot.services.audio_service import inspect_audio
 from soulbot.services.media_service import MediaError
@@ -135,21 +134,22 @@ def test_persisted_quota_and_cancelled_attempt_is_uncertain(services, monkeypatc
         asyncio.run(again.speech.synthesize("不能重置次数"))
 
 
-def test_speech_and_llm_share_cost_budget_and_unknown_blocks_proactive(services, monkeypatch):
+def test_speech_and_llm_share_cost_warnings_without_blocking(services, monkeypatch):
     enable(services, monkeypatch)
     settings = services.config.current
     settings.tts.provider = "openai_compatible"
     settings.tts.compatible.model = "configured-model"
     settings.tts.compatible.voice = "configured-voice"
     services.secrets.save({"tts_api_key": "fixture-not-a-real-key"})
-    with pytest.raises(SpeechError, match="未知费用"):
-        asyncio.run(services.speech.synthesize("主动", "proactive"))
+    assert services.speech.reserve(settings, "主动", "proactive")
     settings.tts.compatible.price_cny_per_1000_chars = 100
     settings.behavior.daily_cost_cny = 1
     key = services.speech.reserve(settings, "一二三四五六七八九十", "explicit")
     services.speech.finish(key, "completed")
-    with pytest.raises(ProviderError, match="费用预算"):
-        services.budget.reserve(settings, settings.llm, "primary", "explicit", 1, 1)
+    assert services.budget.reserve(settings, settings.llm, "primary", "explicit", 1, 1)
+    assert any(
+        item["code"] == "daily_cost" for item in services.budget.summary(settings)["warnings"]
+    )
     assert services.budget.summary(settings)["known_or_estimated_cost_cny"] >= 1
 
 
