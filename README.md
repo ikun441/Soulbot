@@ -88,3 +88,7 @@ node --test tests/web/*.test.mjs
 ```
 
 详细运行边界、依赖核查、真实服务验收和故障恢复集中在 [debug.md](docs/debug.md)；接口及配置说明见 [api.md](docs/api.md)；完整历史见 [version.me](docs/version.me)。跨平台 CI 模板见 [scripts/ci.yml.example](scripts/ci.yml.example)，启用需要仓库 workflow 权限；本次本地测试结果与远端 CI 状态分别报告。
+
+## 社群
+<img width="1284" height="2283" alt="微信图片_20261030190348_75_72" src="https://github.com/user-attachments/assets/c3b0b239-6807-4ba4-87a1-559a94e62504" />
+
