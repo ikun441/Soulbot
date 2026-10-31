@@ -71,7 +71,14 @@ class BackupService:
         ):
             return False
         return (
-            name in {"config.yaml", ".env", "data/secrets.json", "data/soulbot.db"}
+            name
+            in {
+                "config.yaml",
+                ".env",
+                "data/secrets.json",
+                "data/plugin-secrets.json",
+                "data/soulbot.db",
+            }
             or (
                 len(path.parts) > 1
                 and path.parts[0] == "emoji"
@@ -86,7 +93,10 @@ class BackupService:
 
     def snapshot(self):
         files = {}
-        candidates = [self.root / name for name in ("config.yaml", ".env", "data/secrets.json")]
+        candidates = [
+            self.root / name
+            for name in ("config.yaml", ".env", "data/secrets.json", "data/plugin-secrets.json")
+        ]
         for directory in (self.root / "emoji", self.root / "data/wallpapers"):
             if directory.exists():
                 candidates.extend(directory.rglob("*"))
@@ -170,6 +180,27 @@ class BackupService:
                     or any(not isinstance(v, str) for v in keys.values())
                 ):
                     raise ValueError
+            if "data/plugin-secrets.json" in files:
+                content = files["data/plugin-secrets.json"]
+                if len(content) > 1024 * 1024:
+                    raise ValueError
+                plugin_secrets = json.loads(content)
+                if not isinstance(plugin_secrets, dict):
+                    raise ValueError
+                for identity, values in plugin_secrets.items():
+                    if (
+                        not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", identity)
+                        or not isinstance(values, dict)
+                        or len(values) > 50
+                    ):
+                        raise ValueError
+                    if any(
+                        not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", key)
+                        or not isinstance(value, str)
+                        or len(value) > 16384
+                        for key, value in values.items()
+                    ):
+                        raise ValueError
             with tempfile.TemporaryDirectory(
                 dir=self.root / "data", prefix="validate-"
             ) as temporary:
@@ -183,7 +214,7 @@ class BackupService:
                             "SELECT value FROM metadata WHERE key='schema_version'"
                         ).fetchone()[0]
                     )
-                    if not 1 <= version <= 15:
+                    if not 1 <= version <= 17:
                         raise ValueError
             return files
         except (
@@ -247,6 +278,8 @@ class BackupService:
                 "memory_preferences",
                 "diary_preferences",
                 "tool_approvals",
+                "reflection_jobs",
+                "social_feedback",
             )
             with (
                 sqlite3.connect(
@@ -268,6 +301,18 @@ class BackupService:
                     target.executemany(
                         f"INSERT OR REPLACE INTO {table}({names}) VALUES ({placeholders})", values
                     )
+                if "plugin_settings" in available:
+                    for identity, enabled, policy, revision in source.execute(
+                        "SELECT id,enabled,policy,revision FROM plugin_settings"
+                    ):
+                        target.execute(
+                            "UPDATE plugin_settings SET enabled=CASE WHEN ?=0 THEN 0 ELSE enabled END,policy=CASE WHEN ?='deny' THEN 'deny' ELSE policy END,revision=MAX(revision,?)+1 WHERE id=?",
+                            (enabled, policy, revision, identity),
+                        )
+                # Never resume analysis of private text from an old snapshot.
+                target.execute(
+                    "UPDATE reflection_jobs SET status='cancelled',input_text='',result_json='{}' WHERE status IN ('queued','running')"
+                )
                 # Prevent replaying jobs/drafts that were already dispatched after the snapshot.
                 for table, key, statuses in (
                     (
@@ -322,6 +367,7 @@ class BackupService:
         self.write_bytes(recovery, self.snapshot())
         files.setdefault(".env", b"")
         files.setdefault("data/secrets.json", b"{}")
+        files.setdefault("data/plugin-secrets.json", b"{}")
         self.preserve_limits(files)
         old = {
             name: (self.root / name).read_bytes() if (self.root / name).is_file() else None

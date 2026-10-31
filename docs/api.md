@@ -193,3 +193,26 @@
 | GET | `/api/wallpaper/{name}` |
 | POST | `/api/wizard/complete` |
 | PUT | `/api/wizard/progress` |
+
+
+## v2.0.3 设置、记忆与插件
+
+所有以下接口要求管理员会话，并沿用现有来源验证。设置通过 `/api/config` 的统一 Schema 保存；`action_memory` 默认开启局部与全局检索，`reflection` 默认关闭。全局检索只包含审核通过、获长期保存授权、有效且未关闭的记忆，不赋予外发权限。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/reflection/status` | 后台候选任务、动作记忆访问计数 |
+| POST | `/api/reflection/run` | 唤醒已有候选队列，不伪造输入事件 |
+| GET / POST | `/api/emoji/categories` | 分类列表 / 创建分类 |
+| GET | `/api/emoji/status` | 索引与监测状态 |
+| POST | `/api/onboarding/emoji/prepare` | 初始化及刷新内置表情库 |
+| GET | `/api/plugins` | 已安装插件、脱敏参数、市场和安装状态 |
+| POST | `/api/plugins/market/refresh` | 读取指定仓库固定提交的市场索引 |
+| POST | `/api/plugins/install` | 按 id、commit 安装；须 acknowledge_download=true |
+| PUT | `/api/plugins/{id}/config` | revision、values、secrets、clear_secrets、policy |
+| POST | `/api/plugins/{id}/enable` | revision 及 acknowledge_python_execution=true |
+| POST | `/api/plugins/{id}/disable` | revision，停用插件 |
+
+Emoji 浏览与搜索支持 `category` 参数，模型工具包含 `list_emoji_categories` 和按分类分页的 `browse_emoji`。记忆审核可提交 `replace_target`，仅在来源作用域与目标 revision 一致时替换。
+
+插件元数据使用 `define.name`、`define.author`、`define.version`、`define.info`；工具经 Tool Registry 权限与参数验证，默认需要审批。GitHub 私有源凭据通过 `/api/secrets` 的 `plugin_github_token` 写入，普通读取只返回配置状态。完整 SDK 与市场索引格式见[插件开发规范](https://github.com/ikun441/soulbot_plugins/blob/main/PLUGIN_SPEC.md)。

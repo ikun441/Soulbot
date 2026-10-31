@@ -22,6 +22,7 @@ from pydantic import Field, SecretStr
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from soulbot import VERSION
+from soulbot.core.action_memory import ActionMemory
 from soulbot.core.agent import SoulBotAgent
 from soulbot.core.budget import BudgetService
 from soulbot.core.consent import ConsentStore
@@ -45,8 +46,10 @@ from soulbot.services.image_service import ImageGenerationService
 from soulbot.services.llm_service import LLMService
 from soulbot.services.media_service import MediaError, MediaStore
 from soulbot.services.meme_service import MemeService
+from soulbot.services.plugin_service import PluginService
 from soulbot.services.provider_diagnostics import ProviderDiagnostics
 from soulbot.services.qzone_service import QZoneService
+from soulbot.services.reflection_service import ReflectionService
 from soulbot.services.render_service import HTMLRenderService
 from soulbot.services.search_service import SearchService
 from soulbot.services.secret_service import SecretService
@@ -66,6 +69,7 @@ class Login(Model):
 
 
 class SecretUpdate(Model):
+    plugin_github_token: SecretStr | None = None
     llm_api_key: SecretStr | None = None
     onebot_access_token: SecretStr | None = None
     llm_fallback_1: SecretStr | None = None
@@ -115,6 +119,9 @@ class Services:
     search: SearchService | None = None
     periods: DiaryPeriods | None = None
     approvals: ToolApprovals | None = None
+    reflection: ReflectionService | None = None
+    action_memory: ActionMemory | None = None
+    plugins: PluginService | None = None
 
 
 def build_services(root):
@@ -157,6 +164,9 @@ def build_services(root):
         services.diagnostics,
     )
     services.llm.memory = services.memory
+    services.action_memory = ActionMemory(services)
+    services.llm.memory_access = services.action_memory
+    services.tools.before_execute = services.action_memory.tool_preflight
     services.media = MediaStore(root, db)
     services.media.cleanup()
     services.audio = AudioStore(root, db)
@@ -186,6 +196,7 @@ def build_services(root):
     from soulbot.tools.social_tools import register_social_tools
 
     register_social_tools(services)
+    services.plugins = PluginService(services)
 
     def argument_guard(name, arguments, context):
         if name in {
@@ -201,6 +212,8 @@ def build_services(root):
     services.approvals = ToolApprovals(services)
     services.tools.approval_queue = services.approvals.enqueue
     services.agent = SoulBotAgent(config, db, services.llm, services)
+    services.reflection = ReflectionService(services)
+    services.agent.executor.before_action = services.action_memory.send_preflight
     services.scheduler = ProactiveScheduler(services)
     services.agent.executor.proactive_guard = services.scheduler.allowed_event
     with db.connect() as connection:
@@ -234,9 +247,15 @@ def create_web_app(root: Path, services=None):
         await s.diary.startup()
         await s.qzone.startup()
         await s.search.startup()
+        await s.reflection.startup()
+        await s.emoji.startup()
+        await s.plugins.startup()
         try:
             yield
         finally:
+            await s.plugins.close()
+            await s.reflection.close()
+            await s.emoji.close()
             await s.search.close()
             await s.qzone.close()
             await s.diary.close()
@@ -441,6 +460,11 @@ def create_web_app(root: Path, services=None):
         if previous.meme != settings.meme:
             await s.meme.close()
             await s.meme.startup()
+        if previous.plugins.enabled != settings.plugins.enabled:
+            if settings.plugins.enabled:
+                await s.plugins.startup()
+            else:
+                await s.plugins.close()
         s.db.audit("config_saved")
         return configuration()
 
@@ -616,6 +640,9 @@ def create_web_app(root: Path, services=None):
     from soulbot.web.api.platform import install_platform_api
 
     install_platform_api(app, s, authorized)
+    from soulbot.web.api.plugins import install_plugins_api
+
+    install_plugins_api(app, s, authorized)
 
     @app.get("/api/audit", dependencies=[Depends(authorized)])
     def audit():

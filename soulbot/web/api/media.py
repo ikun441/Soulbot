@@ -12,6 +12,10 @@ from soulbot.tools.html_render import CardRequest
 from soulbot.tools.media_tools import GenerateMeme, read_image, specifications
 
 
+class EmojiCategory(Model):
+    name: str = Field(min_length=1, max_length=40)
+
+
 class Labels(Model):
     tags: list[str] = Field(default_factory=list, max_length=20)
     aliases: list[str] = Field(default_factory=list, max_length=20)
@@ -61,15 +65,37 @@ def install_media_api(app, s, authorized):
         await asyncio.to_thread(s.db.audit, "html_render_generated", data.template)
         return item
 
+    @app.post("/api/onboarding/emoji/prepare", dependencies=protected)
+    async def prepare_emoji():
+        result = await asyncio.to_thread(s.emoji.refresh)
+        return {**result, "categories": (await asyncio.to_thread(s.emoji.categories))["items"]}
+
+    @app.get("/api/emoji/categories", dependencies=protected)
+    async def emoji_categories(
+        query: str = Query(default="", max_length=100),
+        offset: int = Query(default=0, ge=0, le=1000000),
+        limit: int = Query(default=100, ge=1, le=100),
+    ):
+        return await asyncio.to_thread(s.emoji.categories, query, offset, limit)
+
+    @app.post("/api/emoji/categories", dependencies=protected)
+    async def add_emoji_category(data: EmojiCategory):
+        return await asyncio.to_thread(s.emoji.add_category, data.name)
+
+    @app.get("/api/emoji/status", dependencies=protected)
+    async def emoji_status():
+        return await asyncio.to_thread(s.emoji.status)
+
     @app.get("/api/emoji", dependencies=protected)
     async def emoji(
         query: str = Query(default="", max_length=100),
         offset: int = Query(default=0, ge=0, le=1000000),
         limit: int = Query(default=100, ge=1, le=200),
+        category: str = Query(default="", max_length=120),
     ):
         if query.strip():
-            return await asyncio.to_thread(s.emoji.search, query, limit)
-        return await asyncio.to_thread(s.emoji.browse, offset, limit)
+            return await asyncio.to_thread(s.emoji.search, query, limit, category)
+        return await asyncio.to_thread(s.emoji.browse, offset, limit, category)
 
     @app.post("/api/emoji/refresh", dependencies=protected)
     async def refresh():

@@ -31,6 +31,7 @@ class ToolContext:
     purpose: str = "explicit"
     approved_tools: frozenset[str] = frozenset()
     available_tools: frozenset[str] = frozenset()
+    memory_references: dict = field(default_factory=dict)
 
 
 class ToolRegistry:
@@ -39,6 +40,7 @@ class ToolRegistry:
         self.tools: dict[str, Tool] = {}
         self.argument_guard = None
         self.approval_queue = None
+        self.before_execute = None
 
     def register(self, tool: Tool):
         if tool.name in self.tools or tool.timeout <= 0 or tool.max_calls < 1:
@@ -66,6 +68,9 @@ class ToolRegistry:
         context.calls[name] = context.calls.get(name, 0) + 1
         if queued:
             return self.approval_queue(name, validated, context)
+        if self.before_execute:
+            await self.before_execute(name, validated, context)
+            self.permissions.require(name, approved=name in context.approved_tools)
         self.audit("tool_started", name)
         try:
             operation = (

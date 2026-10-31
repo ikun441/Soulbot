@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 15:
+            if version > 17:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -355,5 +355,60 @@ class Database:
                     CREATE TABLE IF NOT EXISTS diary_summary_deleted (
                         scope TEXT NOT NULL, week_start TEXT NOT NULL, PRIMARY KEY(scope,week_start));
                     UPDATE metadata SET value='15' WHERE key='schema_version';
+                    COMMIT;
+                """)
+
+            if version < 16:
+                additions = {
+                    "memories": {
+                        "proposed_target_id": "INTEGER",
+                        "proposed_target_revision": "INTEGER",
+                        "evidence": "TEXT NOT NULL DEFAULT ''",
+                    },
+                    "relationships": {
+                        "daily_loss": "INTEGER NOT NULL DEFAULT 0",
+                        "last_feedback_at": "REAL",
+                    },
+                    "exploration_notes": {
+                        "synthesis_json": "TEXT NOT NULL DEFAULT '{}'",
+                        "reviewed": "INTEGER NOT NULL DEFAULT 0",
+                    },
+                }
+                changes = []
+                for table, fields in additions.items():
+                    present = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+                    changes.extend(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {kind};"
+                        for name, kind in fields.items()
+                        if name not in present
+                    )
+                db.executescript(
+                    "BEGIN IMMEDIATE;\n"
+                    + "\n".join(changes)
+                    + """
+                    CREATE TABLE IF NOT EXISTS reflection_jobs (
+                        id TEXT PRIMARY KEY, scope TEXT NOT NULL, bot_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL, group_id TEXT NOT NULL,
+                        message_id TEXT NOT NULL, input_text TEXT NOT NULL,
+                        status TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL,
+                        started_at REAL, day TEXT, result_json TEXT NOT NULL DEFAULT '{}');
+                    CREATE INDEX IF NOT EXISTS reflection_due ON reflection_jobs(status,created_at);
+                    CREATE TABLE IF NOT EXISTS social_feedback (
+                        event_key TEXT NOT NULL, kind TEXT NOT NULL, scope TEXT NOT NULL,
+                        signal TEXT NOT NULL, delta REAL NOT NULL, created_at REAL NOT NULL,
+                        PRIMARY KEY(event_key,kind));
+                    UPDATE metadata SET value='16' WHERE key='schema_version';
+                    COMMIT;
+                """
+                )
+
+            if version < 17:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS plugin_settings (
+                        id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
+                        values_json TEXT NOT NULL DEFAULT '{}', policy TEXT NOT NULL DEFAULT 'approval',
+                        approved_hash TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 0);
+                    UPDATE metadata SET value='17' WHERE key='schema_version';
                     COMMIT;
                 """)

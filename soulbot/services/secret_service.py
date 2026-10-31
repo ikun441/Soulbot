@@ -6,6 +6,7 @@ from soulbot.services.config_service import atomic_write
 from soulbot.services.environment_service import EnvironmentService
 
 NAMES = {
+    "plugin_github_token": "SOULBOT_PLUGIN_GITHUB_TOKEN",
     "llm_api_key": "SOULBOT_LLM_API_KEY",
     "onebot_access_token": "SOULBOT_ONEBOT_ACCESS_TOKEN",
     "llm_fallback_1": "SOULBOT_LLM_FALLBACK_1",

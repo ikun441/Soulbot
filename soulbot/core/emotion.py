@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 
-from soulbot.core.social_state import StateConflict, observe_once
+from soulbot.core.social_state import StateConflict, feedback_job_valid, observe_once
 from soulbot.services.config_service import EmotionValues
 
 STATES = {
@@ -210,3 +210,49 @@ class EmotionEngine:
             data["revision"] += 1
             self._save(db, data)
             self._history(db, data, previous, "interaction", now)
+
+    def apply_feedback(self, event, signal, job_id=None):
+        if job_id is not None and (
+            not self.config.current.reflection.enabled or self.config.current.automation.paused
+        ):
+            return False
+        policy, now = self.config.current.emotion, self.clock()
+        changes = {
+            "positive": {"valence": 1, "sociability": 0.5},
+            "negative": {"valence": -1, "sociability": -0.5},
+            "curious": {"curiosity": 1},
+            "tired": {"energy": -0.5, "fatigue": 1},
+        }
+        if not policy.enabled or not policy.automatic or signal not in changes:
+            return False
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not feedback_job_valid(db, event, job_id, now):
+                return False
+            last = db.execute(
+                "SELECT MAX(created_at) FROM social_feedback WHERE kind='emotion'"
+            ).fetchone()[0]
+            if last is not None and now - last < policy.interaction_cooldown_seconds:
+                return False
+            if db.execute(
+                "SELECT 1 FROM social_feedback WHERE event_key=? AND kind='emotion'", (event.key,)
+            ).fetchone():
+                return False
+            data = self._load(db, policy, now)
+            self._advance(db, data, policy, now)
+            previous = data["state"]
+            for key, delta in changes[signal].items():
+                data["values"][key] = max(
+                    0, min(100, data["values"][key] + delta * policy.feedback_strength)
+                )
+            data["state"] = choose_state(data["values"], policy, previous, data["state_since"], now)
+            if previous != data["state"]:
+                data["state_since"] = now
+            data["revision"] += 1
+            self._save(db, data)
+            self._history(db, data, previous, "feedback_" + signal, now)
+            db.execute(
+                "INSERT INTO social_feedback VALUES (?,?,?,?,?,?)",
+                (event.key, "emotion", event.scope, signal, policy.feedback_strength, now),
+            )
+        return True

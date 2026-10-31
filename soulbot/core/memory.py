@@ -46,6 +46,7 @@ class MemoryCreate(MemoryFields):
 class MemoryEdit(MemoryFields):
     revision: int = Field(ge=0, strict=True)
     status: MemoryStatus = "candidate"
+    replace_target: bool = False
 
     @model_validator(mode="after")
     def consent(self):
@@ -99,7 +100,7 @@ class MemoryEngine:
             ).fetchall()
         return {"items": [self.row(row) for row in rows], "total": total}
 
-    def create(self, data: MemoryCreate, *, capture_scope=None):
+    def create(self, data: MemoryCreate, *, capture_scope=None, capture_job=None):
         values = data.model_dump()
         now = self.clock()
         values["expires_at"] = data.expires_at if data.expires_at is not None else now + 30 * 86400
@@ -113,6 +114,18 @@ class MemoryEngine:
                 ).fetchone()
                 if not self.config.current.memory.enabled or (preference and not preference[0]):
                     raise ValueError("当前会话记忆已关闭")
+            if capture_job is not None:
+                job = db.execute(
+                    "SELECT 1 FROM reflection_jobs WHERE id=? AND scope=? AND status='running' AND expires_at>?",
+                    (capture_job, capture_scope, now),
+                ).fetchone()
+                if (
+                    not job
+                    or not self.config.current.reflection.enabled
+                    or not self.config.current.reflection.extract_memory
+                    or self.config.current.automation.paused
+                ):
+                    raise ValueError("自动整理任务已取消")
             old = db.execute("SELECT * FROM memories WHERE fingerprint=?", (digest,)).fetchone()
             if old:
                 return {"item": self.row(old), "duplicate": True}
@@ -152,9 +165,27 @@ class MemoryEngine:
             ):
                 raise ValueError("请先调整已过期的记忆有效期")
             digest = fingerprint(old["bot_id"], old["user_id"], old["group_id"], data.content)
-            values = data.model_dump(exclude={"revision"})
+            values = data.model_dump(exclude={"revision", "replace_target"})
             if data.status == "candidate" and data.expires_at is None:
                 values["expires_at"] = self.clock() + 30 * 86400
+            target = None
+            if data.replace_target:
+                if (
+                    data.status != "approved"
+                    or not data.long_term_allowed
+                    or not old["proposed_target_id"]
+                ):
+                    raise ValueError("合并需要审核通过并确认长期保存授权")
+                target = db.execute(
+                    "SELECT * FROM memories WHERE id=? AND bot_id=? AND user_id=? AND group_id=?",
+                    (old["proposed_target_id"], old["bot_id"], old["user_id"], old["group_id"]),
+                ).fetchone()
+                if (
+                    not target
+                    or target["revision"] != old["proposed_target_revision"]
+                    or target["status"] != "approved"
+                ):
+                    raise StateConflict("原记忆已变化，请重新核对更新建议")
             assignment = ",".join(f"{key}=?" for key in values)
             try:
                 db.execute(
@@ -163,6 +194,11 @@ class MemoryEngine:
                 )
             except sqlite3.IntegrityError:
                 raise StateConflict("本会话已有相同记忆，请编辑现有条目") from None
+            if target is not None:
+                db.execute(
+                    "UPDATE memories SET status='archived',updated_at=?,revision=revision+1 WHERE id=?",
+                    (self.clock(), target["id"]),
+                )
             item = self.row(db.execute("SELECT * FROM memories WHERE id=?", (key,)).fetchone())
         self.db.audit("memory_edited", data.status)
         return item
@@ -189,6 +225,11 @@ class MemoryEngine:
 
     def preference(self, event, enabled):
         with self.db.connect() as db:
+            if not enabled:
+                db.execute(
+                    "UPDATE reflection_jobs SET status='cancelled',input_text='',result_json='{}' WHERE scope=?",
+                    (event.scope,),
+                )
             db.execute(
                 "INSERT INTO memory_preferences VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled",
                 (event.scope, int(enabled)),
@@ -197,6 +238,10 @@ class MemoryEngine:
 
     def forget(self, event):
         with self.db.connect() as db:
+            db.execute(
+                "UPDATE reflection_jobs SET status='cancelled',input_text='',result_json='{}' WHERE scope=?",
+                (event.scope,),
+            )
             count = db.execute(
                 "DELETE FROM memories WHERE bot_id=? AND group_id=? AND user_id=?",
                 (event.bot_id, event.group_id or "", event.user_id),
@@ -335,4 +380,56 @@ class MemoryEngine:
             result = candidate
             if len(result) >= policy.max_items:
                 break
+        return result
+
+    def propose(self, event, item, evidence, job_id):
+        from difflib import SequenceMatcher
+
+        data = MemoryCreate(
+            bot_id=event.bot_id,
+            user_id=event.user_id,
+            group_id=event.group_id or "",
+            content=item.content,
+            kind=item.kind,
+            importance=item.importance,
+            confidence=0.7,
+            source="当前会话自动整理；待审核",
+            long_term_allowed=False,
+        )
+        result = self.create(data, capture_scope=event.scope, capture_job=job_id)
+        if result["duplicate"]:
+            return result
+        with self.db.connect() as db:
+            rows = db.execute(
+                "SELECT id,revision,content FROM memories WHERE bot_id=? AND user_id=? AND group_id=? AND status='approved' AND (expires_at IS NULL OR expires_at>?) ORDER BY updated_at DESC LIMIT 200",
+                (event.bot_id, event.user_id, event.group_id or "", self.clock()),
+            ).fetchall()
+            ranked = sorted(
+                (
+                    (
+                        SequenceMatcher(
+                            None, item.content.casefold(), r["content"].casefold()
+                        ).ratio(),
+                        r,
+                    )
+                    for r in rows
+                ),
+                key=lambda v: v[0],
+                reverse=True,
+            )
+            target = ranked[0][1] if ranked and ranked[0][0] >= 0.65 else None
+            db.execute(
+                "UPDATE memories SET evidence=?,proposed_target_id=?,proposed_target_revision=? WHERE id=? AND status='candidate'",
+                (
+                    evidence,
+                    target["id"] if target else None,
+                    target["revision"] if target else None,
+                    result["item"]["id"],
+                ),
+            )
+            row = db.execute(
+                "SELECT * FROM memories WHERE id=?", (result["item"]["id"],)
+            ).fetchone()
+            if row:
+                result["item"] = self.row(row)
         return result

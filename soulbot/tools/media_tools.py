@@ -22,7 +22,14 @@ class GenerateImage(Model):
     prompt: str = Field(min_length=1, max_length=4000)
 
 
+class EmojiCategories(Model):
+    query: str = Field(default="", max_length=100)
+    offset: int = Field(default=0, ge=0, le=1000000)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
 class BrowseEmoji(Model):
+    category: str = Field(default="", max_length=120)
     offset: int = Field(default=0, ge=0, le=1000000)
     limit: int = Field(default=100, ge=1, le=200)
 
@@ -75,9 +82,17 @@ class ToolPermissions(PermissionEngine):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.dynamic = {}
+
+    def policy(self, name):
+        if name.startswith("plugin_") and not self.config.current.plugins.enabled:
+            return "deny"
+        return self.dynamic.get(name, getattr(self.config.current.tools, name, "deny"))
 
     def require(self, name, *, approved=False):
-        self.policies = self.config.current.tools.model_dump()
+        self.policies = self.config.current.tools.model_dump() | self.dynamic
+        if name.startswith("plugin_") and not self.config.current.plugins.enabled:
+            self.policies[name] = "deny"
         super().require(name, approved=approved)
 
 
@@ -106,8 +121,13 @@ def register_media_tools(s):
     async def search(args):
         return concise(await asyncio.to_thread(s.emoji.search, args.query, args.limit))
 
+    async def categories(args):
+        return await asyncio.to_thread(s.emoji.categories, args.query, args.offset, args.limit)
+
     async def browse(args):
-        return concise(await asyncio.to_thread(s.emoji.browse, args.offset, args.limit))
+        return concise(
+            await asyncio.to_thread(s.emoji.browse, args.offset, args.limit, args.category)
+        )
 
     async def select(args):
         await asyncio.to_thread(s.emoji.read, args.emoji_id)
@@ -193,7 +213,18 @@ def register_media_tools(s):
             SearchEmoji,
             search,
         ),
-        ("browse_emoji", "分页浏览本地表情，避免读取整个表情库。", BrowseEmoji, browse),
+        (
+            "list_emoji_categories",
+            "先检索本地表情分类名称与数量，再用 browse_emoji 按分类分页挑选。支持空分类，offset 用于下一页分类。",
+            EmojiCategories,
+            categories,
+        ),
+        (
+            "browse_emoji",
+            "按 category 分类名称分页浏览表情列表。先用 list_emoji_categories 获取分类；不足时增加 offset，不遍历全库。",
+            BrowseEmoji,
+            browse,
+        ),
         (
             "select_emoji",
             "只选择 search_emoji 或 browse_emoji 返回的本地 emoji_id。生成工具返回的 media 附件已经会发送，不要传给此工具；不能传路径或网址。",
@@ -272,10 +303,10 @@ def specifications(s, event=None):
             },
         }
         for tool in s.tools.tools.values()
-        if getattr(config.tools, tool.name, "deny") in {"auto", "approval"}
+        if s.tools.permissions.policy(tool.name) in {"auto", "approval"}
         and (
             True
-            if tool.name == "discover_tools"
+            if tool.name == "discover_tools" or tool.name.startswith("plugin_")
             else config.diary.enabled
             if tool.name == "create_diary"
             else config.qzone.enabled
@@ -296,7 +327,7 @@ def specifications(s, event=None):
             else config.html_render.enabled and s.renderer.ready()
             if tool.name == "render_html"
             else config.emoji.enabled
-            if tool.name.endswith("emoji")
+            if tool.name.endswith("emoji") or tool.name == "list_emoji_categories"
             else config.meme.enabled
         )
     ]

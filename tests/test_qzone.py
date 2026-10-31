@@ -98,7 +98,7 @@ def test_migration_from_eleven_is_idempotent_and_preserves_existing_data(s):
             db.execute("DROP TABLE " + table)
         db.execute("UPDATE metadata SET value='11' WHERE key='schema_version'")
     again = Database(s.db.path)
-    assert again.get("schema_version") == "15" and again.get("preserved") == "fixture"
+    assert again.get("schema_version") == "17" and again.get("preserved") == "fixture"
     Database(s.db.path)
     assert create(s)["status"] == "pending_approval"
 

@@ -197,6 +197,9 @@ def create_runtime(services):
     nonebot.get_app().mount("/", web)
 
     async def shutdown():
+        await services.plugins.close()
+        await services.reflection.close()
+        await services.emoji.close()
         await services.search.close()
         await services.qzone.close()
         await services.diary.close()
@@ -214,6 +217,9 @@ def create_runtime(services):
     driver.on_startup(services.diary.startup)
     driver.on_startup(services.qzone.startup)
     driver.on_startup(services.search.startup)
+    driver.on_startup(services.reflection.startup)
+    driver.on_startup(services.emoji.startup)
+    driver.on_startup(services.plugins.startup)
     import uvicorn
 
     config = uvicorn.Config(

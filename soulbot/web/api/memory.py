@@ -28,6 +28,14 @@ def install_memory_api(app, s, authorized):
         except ValueError:
             raise HTTPException(422, "记忆参数不符合要求，请检查授权、有效期或候选数量") from None
 
+    @app.get("/api/reflection/status", dependencies=protected)
+    def reflection_status():
+        return s.reflection.status()
+
+    @app.post("/api/reflection/run", dependencies=protected)
+    async def reflection_run():
+        return s.reflection.kick()
+
     @app.get("/api/memories", dependencies=protected)
     def listing(
         query: str = Query(default="", max_length=80),

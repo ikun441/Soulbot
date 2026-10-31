@@ -71,7 +71,7 @@ def test_schema_ten_migration_preserves_data_and_is_idempotent(services):
             db.execute("DROP TABLE " + table)
         db.execute("UPDATE metadata SET value='10' WHERE key='schema_version'")
     db = Database(s.db.path)
-    assert db.get("schema_version") == "15" and db.get("preserved") == "fixture"
+    assert db.get("schema_version") == "17" and db.get("preserved") == "fixture"
     Database(db.path)
     facts(s)
     end_day(s)
@@ -526,7 +526,7 @@ def test_schema_twelve_migration_preserves_events_and_diaries(services):
         db.execute("DROP TABLE diary_qzone_seen")
         db.execute("UPDATE metadata SET value='12' WHERE key='schema_version'")
     upgraded = Database(s.db.path)
-    assert upgraded.get("schema_version") == "15"
+    assert upgraded.get("schema_version") == "17"
     assert s.diary.get(old["id"])["is_final"]
     assert s.diary.get(old["id"])["role_text"] == old["role_text"]
     with upgraded.connect() as db:

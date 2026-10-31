@@ -1,7 +1,9 @@
+import asyncio
 import hashlib
 import json
 import os
 import re
+import time
 import uuid
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -19,6 +21,10 @@ class EmojiLibrary:
             raise MediaError("emoji 目录不能是符号链接")
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = RLock()
+        self.task = None
+        self.watch_signature = None
+        self.watch_error = False
+        self.watch_updated_at = None
         for category in ("开心", "难过", "生气", "整活", "其他"):
             (self.root / category).mkdir(exist_ok=True)
 
@@ -101,17 +107,21 @@ class EmojiLibrary:
             raise MediaError("表情不存在，请重新索引")
         return dict(row)
 
-    def browse(self, offset=0, limit=100):
+    def browse(self, offset=0, limit=100, category=""):
         self.require()
         options = self.config.current.emoji
         if not options.browse_enabled:
             raise MediaError("分页浏览已关闭，仍可以关键词检索")
         offset, limit = max(0, offset), min(max(1, limit), options.max_files)
         with self.db.connect() as db:
-            total = db.execute("SELECT COUNT(*) FROM emoji_index").fetchone()[0]
+            clause = " WHERE category=?" if category else ""
+            args = [category] if category else []
+            total = db.execute("SELECT COUNT(*) FROM emoji_index" + clause, args).fetchone()[0]
             rows = db.execute(
-                "SELECT * FROM emoji_index ORDER BY category,name,id LIMIT ? OFFSET ?",
-                (limit, offset),
+                "SELECT * FROM emoji_index"
+                + clause
+                + " ORDER BY category,name,id LIMIT ? OFFSET ?",
+                (*args, limit, offset),
             ).fetchall()
         return {
             "items": [self.public(row) for row in rows],
@@ -120,13 +130,16 @@ class EmojiLibrary:
             "total": total,
         }
 
-    def search(self, query, limit=12):
+    def search(self, query, limit=12, category=""):
         self.require()
         query = query.strip().casefold()[:100]
         if not query:
             return {"items": [], "total": 0}
         with self.db.connect() as db:
-            rows = db.execute("SELECT * FROM emoji_index").fetchall()
+            rows = db.execute(
+                "SELECT * FROM emoji_index" + (" WHERE category=?" if category else ""),
+                [category] if category else [],
+            ).fetchall()
         scored = []
         for row in rows:
             values = [
@@ -197,3 +210,123 @@ class EmojiLibrary:
             relative = path.relative_to(self.root).as_posix()
             self.refresh()
         return self.public(self.get(hashlib.sha256(relative.encode()).hexdigest()[:32]))
+
+    def scan_changes(self):
+        policy = self.config.current.emoji
+        if not policy.enabled or not policy.watch_changes:
+            self.watch_signature = None
+            return False
+        entries = []
+        for directory, folders, files in os.walk(self.root, followlinks=False):
+            folders[:] = sorted(
+                name
+                for name in folders
+                if policy.recursive
+                and not name.startswith(".")
+                and not (Path(directory) / name).is_symlink()
+            )
+            for name in sorted(files):
+                file = Path(directory) / name
+                if (
+                    name.startswith(".")
+                    or file.suffix.lower() not in EXTENSIONS
+                    or file.is_symlink()
+                ):
+                    continue
+                try:
+                    stat = self.path(file.relative_to(self.root).as_posix()).stat()
+                    entries.append(
+                        (file.relative_to(self.root).as_posix(), stat.st_mtime_ns, stat.st_size)
+                    )
+                except (OSError, MediaError):
+                    continue
+        signature = (policy.recursive, tuple(entries))
+        if signature == self.watch_signature:
+            return False
+        self.refresh()
+        self.watch_signature = signature
+        self.watch_updated_at = time.time()
+        return True
+
+    def status(self):
+        with self.db.connect() as db:
+            count = db.execute("SELECT COUNT(*) FROM emoji_index").fetchone()[0]
+        return {
+            "enabled": self.config.current.emoji.enabled,
+            "watch_changes": self.config.current.emoji.watch_changes,
+            "indexed": count,
+            "watch_updated_at": self.watch_updated_at,
+            "watch_error": self.watch_error,
+        }
+
+    async def startup(self):
+        if self.task and not self.task.done():
+            return
+
+        async def loop():
+            while True:
+                try:
+                    await asyncio.to_thread(self.scan_changes)
+                    self.watch_error = False
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    if not self.watch_error:
+                        self.db.audit("emoji_watch_failed")
+                    self.watch_error = True
+                await asyncio.sleep(self.config.current.emoji.watch_interval_seconds)
+
+        self.task = asyncio.create_task(loop(), name="soulbot-emoji-watch")
+
+    async def close(self):
+        if self.task:
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+            self.task = None
+
+    def categories(self, query="", offset=0, limit=100):
+        self.require()
+        with self.db.connect() as db:
+            counts = dict(db.execute("SELECT category,COUNT(*) FROM emoji_index GROUP BY category"))
+        names = {"."} if counts.get(".", 0) else set()
+        for directory, folders, _ in os.walk(self.root, followlinks=False):
+            folders[:] = sorted(
+                n
+                for n in folders
+                if not n.startswith(".") and not (Path(directory) / n).is_symlink()
+            )
+            for folder in folders:
+                relative = (Path(directory) / folder).relative_to(self.root).as_posix()
+                self.path(relative)
+                names.add(relative)
+            if not self.config.current.emoji.recursive:
+                break
+        selected = sorted(name for name in names if query.strip().casefold() in name.casefold())
+        offset, limit = max(0, offset), min(max(1, limit), 100)
+        return {
+            "items": [
+                {"name": name, "count": counts.get(name, 0)}
+                for name in selected[offset : offset + limit]
+            ],
+            "total": len(selected),
+            "offset": offset,
+            "limit": limit,
+        }
+
+    def add_category(self, name):
+        self.require()
+        name = name.strip()
+        if (
+            not 1 <= len(name) <= 40
+            or name.startswith(".")
+            or any(c in name for c in "/\\")
+            or any(ord(c) < 32 or ord(c) == 127 for c in name)
+        ):
+            raise MediaError("分类名称须为1—40字，不能包含路径、隐藏目录或控制字符")
+        path = self.path(name)
+        if path.exists() and not path.is_dir():
+            raise MediaError("同名文件已存在，请使用其他分类名")
+        existed = path.exists()
+        path.mkdir(exist_ok=True)
+        self.db.audit("emoji_category_created")
+        return {"name": name, "created": not existed}

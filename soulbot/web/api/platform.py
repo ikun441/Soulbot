@@ -52,6 +52,10 @@ class PersonalityImport(Model):
 def install_platform_api(app, s, authorized):
     protected = [Depends(authorized)]
 
+    @app.get("/api/settings/memory", dependencies=protected)
+    def action_memory_status():
+        return s.action_memory.status()
+
     @app.get("/api/tool-approvals", dependencies=protected)
     def approvals():
         return s.approvals.listing()

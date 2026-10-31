@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from soulbot.core.social_state import StateConflict, observe_once
+from soulbot.core.social_state import StateConflict, feedback_job_valid, observe_once
 
 
 def affinity_label(value):
@@ -144,6 +144,72 @@ class RelationshipEngine:
             db.execute(
                 "UPDATE relationships SET affinity=affinity+?, interactions=interactions+1,"
                 "last_interaction_at=?,last_reward_at=?,reward_day=?,daily_gain=?,updated_at=?,"
-                "revision=revision+1 WHERE id=?",
-                (gain, now, now if gain else last_reward, day, daily_gain + gain, now, row["id"]),
+                "daily_loss=?,revision=revision+1 WHERE id=?",
+                (
+                    gain,
+                    now,
+                    now if gain else last_reward,
+                    day,
+                    daily_gain + gain,
+                    now,
+                    row["daily_loss"] if row["reward_day"] == day else 0,
+                    row["id"],
+                ),
             )
+
+    def apply_feedback(self, event, signal, job_id=None):
+        if job_id is not None and (
+            not self.config.current.reflection.enabled or self.config.current.automation.paused
+        ):
+            return False
+        settings, now = self.config.current, self.clock()
+        policy = settings.relationships
+        if not policy.enabled or not policy.automatic or signal not in {"positive", "negative"}:
+            return False
+        day = datetime.fromtimestamp(now, ZoneInfo(settings.soulbot.timezone)).date().isoformat()
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not feedback_job_valid(db, event, job_id, now):
+                return False
+            row = db.execute(
+                "SELECT * FROM relationships WHERE bot_id=? AND user_id=? AND group_id=?",
+                (event.bot_id, event.user_id, event.group_id or ""),
+            ).fetchone()
+            if not row or not row["automatic"]:
+                return False
+            if (
+                row["last_feedback_at"] is not None
+                and now - row["last_feedback_at"] < policy.reward_cooldown_seconds
+            ):
+                return False
+            if db.execute(
+                "SELECT 1 FROM social_feedback WHERE event_key=? AND kind='relationship'",
+                (event.key,),
+            ).fetchone():
+                return False
+            gain = row["daily_gain"] if row["reward_day"] == day else 0
+            loss = row["daily_loss"] if row["reward_day"] == day else 0
+            delta = (
+                min(
+                    policy.feedback_gain,
+                    max(0, policy.max_daily_gain - gain),
+                    100 - row["affinity"],
+                )
+                if signal == "positive"
+                else -min(
+                    policy.feedback_loss,
+                    max(0, policy.max_daily_loss - loss),
+                    100 + row["affinity"],
+                )
+            )
+            gain += max(0, delta)
+            loss += max(0, -delta)
+            db.execute(
+                "UPDATE relationships SET affinity=affinity+?,daily_gain=?,daily_loss=?,reward_day=?,last_feedback_at=?,updated_at=?,revision=revision+1 WHERE id=?",
+                (delta, gain, loss, day, now, now, row["id"]),
+            )
+            db.execute(
+                "INSERT INTO social_feedback VALUES (?,?,?,?,?,?)",
+                (event.key, "relationship", event.scope, signal, delta, now),
+            )
+        return True

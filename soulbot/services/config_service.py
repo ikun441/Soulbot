@@ -247,6 +247,8 @@ class EmojiSettings(Model):
     browse_enabled: bool = True
     max_files: int = Field(default=100, ge=1, le=200)
     max_filename_chars: int = Field(default=80, ge=20, le=200)
+    watch_changes: bool = False
+    watch_interval_seconds: int = Field(default=15, ge=5, le=300)
 
 
 class MemeExtensionSettings(Model):
@@ -312,6 +314,7 @@ class MediaToolPolicies(Model):
     browse_memory: Literal["deny", "auto", "approval"] = "auto"
     retrieve_memory: Literal["deny", "auto", "approval"] = "auto"
     save_memory: Literal["deny", "auto", "approval"] = "auto"
+    list_emoji_categories: Literal["deny", "auto", "approval"] = "auto"
     search_emoji: Literal["deny", "auto", "approval"] = "auto"
     browse_emoji: Literal["deny", "auto", "approval"] = "auto"
     select_emoji: Literal["deny", "auto", "approval"] = "auto"
@@ -494,6 +497,7 @@ class EmotionSettings(Model):
     low_threshold: float = Field(default=25, ge=5, le=40, allow_inf_nan=False)
     hysteresis: float = Field(default=10, ge=1, le=20, allow_inf_nan=False)
     min_state_seconds: int = Field(default=60, ge=0, le=3600)
+    feedback_strength: float = Field(default=1, ge=0, le=3, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def separate_thresholds(self):
@@ -508,6 +512,9 @@ class RelationshipSettings(Model):
     affinity_per_interaction: int = Field(default=1, ge=1, le=5)
     reward_cooldown_seconds: int = Field(default=300, ge=60, le=86400)
     max_daily_gain: int = Field(default=5, ge=1, le=20)
+    max_daily_loss: int = Field(default=3, ge=0, le=20)
+    feedback_gain: int = Field(default=1, ge=0, le=3)
+    feedback_loss: int = Field(default=1, ge=0, le=3)
 
 
 class QZoneSettings(Model):
@@ -571,6 +578,36 @@ class MemorySettings(Model):
     max_chars: int = Field(default=1200, ge=200, le=4000)
 
 
+class OnboardingSettings(Model):
+    comfy_mode: Literal["skip", "existing", "install"] = "skip"
+
+
+class PluginSettings(Model):
+    enabled: bool = True
+    repository: str = Field(
+        default="ikun441/soulbot_plugins",
+        pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+        max_length=160,
+    )
+    branch: str = Field(default="main", pattern=r"^[A-Za-z0-9_./-]+$", max_length=100)
+
+
+class ActionMemorySettings(Model):
+    enabled: bool = True
+    local: bool = True
+    global_memory: bool = True
+
+
+class ReflectionSettings(Model):
+    enabled: bool = False
+    extract_memory: bool = True
+    social_feedback: bool = True
+    interval_seconds: int = Field(default=60, ge=10, le=3600)
+    cooldown_seconds: int = Field(default=300, ge=60, le=86400)
+    max_daily_tasks: int = Field(default=20, ge=1, le=100)
+    max_chars: int = Field(default=2000, ge=200, le=4000)
+
+
 class SearchSettings(Model):
     enabled: bool = False
     base_url: str = "http://127.0.0.1:8080"
@@ -627,6 +664,10 @@ class Settings(Model):
     search: SearchSettings = Field(default_factory=SearchSettings)
     exploration: ExplorationSettings = Field(default_factory=ExplorationSettings)
     automation: AutomationSettings = Field(default_factory=AutomationSettings)
+    reflection: ReflectionSettings = Field(default_factory=ReflectionSettings)
+    action_memory: ActionMemorySettings = Field(default_factory=ActionMemorySettings)
+    plugins: PluginSettings = Field(default_factory=PluginSettings)
+    onboarding: OnboardingSettings = Field(default_factory=OnboardingSettings)
 
     @model_validator(mode="after")
     def distinct_ports(self):
