@@ -42,6 +42,7 @@ from soulbot.services.config_service import ConfigService, Model, Settings
 from soulbot.services.diary_periods import DiaryPeriods
 from soulbot.services.diary_service import DiaryService
 from soulbot.services.environment_service import EnvironmentError, EnvironmentService
+from soulbot.services.experience_sampler import ExperienceSampler
 from soulbot.services.image_service import ImageGenerationService
 from soulbot.services.llm_service import LLMService
 from soulbot.services.media_service import MediaError, MediaStore
@@ -117,6 +118,7 @@ class Services:
     diary: DiaryService | None = None
     qzone: QZoneService | None = None
     search: SearchService | None = None
+    experiences: ExperienceSampler | None = None
     periods: DiaryPeriods | None = None
     approvals: ToolApprovals | None = None
     reflection: ReflectionService | None = None
@@ -152,6 +154,7 @@ def build_services(root):
     services.diary = DiaryService(config, db)
     services.qzone = QZoneService(services)
     services.search = SearchService(services)
+    services.experiences = ExperienceSampler(services)
     services.periods = DiaryPeriods(services)
     services.diary.periods = services.periods
     services.diagnostics = ProviderDiagnostics()

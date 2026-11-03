@@ -339,7 +339,7 @@ def test_interrupted_process_recovers_without_resend(s):
     assert not s.qq_transport.sent
 
 
-def test_ai_generation_only_sees_public_topic_no_history_or_tools_and_deduplicates(s, monkeypatch):
+def test_ai_generation_uses_sample_packet_without_private_persona_and_deduplicates(s, monkeypatch):
     calls = []
     s.config.current.personality.prompt = "private-persona-secret"
 
@@ -352,9 +352,14 @@ def test_ai_generation_only_sees_public_topic_no_history_or_tools_and_deduplicat
     row = asyncio.run(s.qzone.create(data))
     assert row["status"] == "pending_approval" and row["source"] == "ai_public_topic"
     assert asyncio.run(s.qzone.create(data))["id"] == row["id"]
-    assert len(calls) == 1 and calls[0][0][1]["content"] == "春日和花朵"
+    assert len(calls) == 1 and json.loads(calls[0][0][1]["content"])["topic"] == "春日和花朵"
     assert "private-persona-secret" not in json.dumps(calls)
-    assert calls[0][1] == {"purpose": "qzone_draft", "output_limit": 512}
+    assert calls[0][1] == {
+        "purpose": "qzone_draft",
+        "output_limit": 512,
+        "tools": [],
+        "include_memory": False,
+    }
     with pytest.raises(ValueError):
         asyncio.run(s.qzone.create(data.model_copy(update={"request_id": uuid4()})))
     assert not s.qq_transport.sent

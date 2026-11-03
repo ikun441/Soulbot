@@ -51,17 +51,30 @@ class DecisionEngine:
             and datetime.fromtimestamp(self.clock(), ZoneInfo(settings.soulbot.timezone)).hour < 8
         )
 
+    def frequency(self, settings, event, name):
+        policy = self.group_policy(settings, event)
+        override = getattr(policy, name, None) if policy else None
+        return override if override is not None else getattr(settings.behavior, name)
+
+    def passive_candidate(self, settings, event, roll):
+        probability = self.frequency(settings, event, "passive_reply_probability")
+        return not roll or probability >= 1 or probability > 0 and self.rng() < probability
+
     def classify(self, settings, event, roll=True):
         if not self.access(settings, event) or not event.text.strip() or len(event.text) > 12000:
             return None
         if not event.group_id:
-            return "direct"
+            return "direct" if self.passive_candidate(settings, event, roll) else None
         state = self.state(event)
         if state["muted_until"] > self.clock() or self.mode(settings, event) == "silent":
             return None
         words = [settings.soulbot.name, *settings.behavior.wake_words]
         wake = any(event.text.strip().casefold().startswith(word.casefold()) for word in words)
         if event.directed or event.reply_target == "bot" or wake:
+            if not settings.behavior.always_reply_mentions and not self.passive_candidate(
+                settings, event, roll
+            ):
+                return None
             with self.db.connect() as db:
                 db.execute(
                     "UPDATE group_state SET unanswered=0 WHERE scope=?", (event.group_scope,)
@@ -74,7 +87,7 @@ class DecisionEngine:
             0 <= elapsed <= settings.behavior.followup_window_seconds
             and event.text.strip().startswith(("你", "那你", "继续", "再说", "还有吗"))
         ):
-            return "followup"
+            return "followup" if self.passive_candidate(settings, event, roll) else None
         policy = self.group_policy(settings, event)
         mode = self.mode(settings, event)
         if (
@@ -87,9 +100,14 @@ class DecisionEngine:
             return None
         if state["pause_until"] > self.clock():
             return None
-        return (
-            "proactive" if not roll or self.rng() < (0.08 if mode == "natural" else 0.20) else None
-        )
+        probability = policy.proactive_probability
+        if probability is None:
+            probability = (
+                settings.behavior.natural_candidate_probability
+                if mode == "natural"
+                else settings.behavior.active_candidate_probability
+            )
+        return "proactive" if not roll or self.rng() < probability else None
 
     def claim(self, settings, event, trigger):
         now = self.clock()
@@ -100,14 +118,17 @@ class DecisionEngine:
             row = db.execute(
                 "SELECT * FROM group_state WHERE scope=?", (event.group_scope,)
             ).fetchone()
-            if now - row["last_call"] < settings.behavior.reply_cooldown_seconds:
+            if trigger != "proactive" and now - row["last_call"] < self.frequency(
+                settings, event, "reply_cooldown_seconds"
+            ):
                 return False
             if trigger == "proactive":
                 count = row["proactive_count"] if row["day"] == day else 0
                 if (
                     row["pause_until"] > now
-                    or now - row["last_proactive"] < settings.behavior.proactive_interval_seconds
-                    or count >= settings.behavior.max_proactive_per_day
+                    or now - row["last_proactive"]
+                    < self.frequency(settings, event, "proactive_interval_seconds")
+                    or count >= self.frequency(settings, event, "max_proactive_per_day")
                 ):
                     return False
                 db.execute(

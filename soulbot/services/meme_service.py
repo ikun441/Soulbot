@@ -65,6 +65,9 @@ class MemeClient:
         self.rate = MemeRateLimiter(config, db)
         self.transport = None
         self.limiter = asyncio.Semaphore(2)
+        self.known_keywords = {}
+        self.keyword_stamp = None
+        self.keyword_cache = {}
 
     def origins(self):
         if self.root and self.config.current.meme.managed:
@@ -181,7 +184,56 @@ class MemeClient:
         except (KeyError, TypeError, ValueError):
             raise MediaError("模板参数元数据无效，已停止生成") from None
         value["soulbot_source"] = source
+        self.known_keywords[key] = value.get("keywords", [])
         return value
+
+    def keywords(self):
+        index = {}
+        if self.root and self.config.current.meme.managed:
+            path = self.root / "loaded-templates.json"
+            try:
+                stamp = (path.stat().st_mtime_ns, path.stat().st_size)
+                if stamp != self.keyword_stamp:
+                    if path.is_symlink() or stamp[1] > 4 * 1024 * 1024:
+                        raise ValueError("Invalid template index")
+                    raw = json.loads(path.read_text()).get("keywords", {})
+                    self.keyword_cache = {
+                        k: [v for v in values if isinstance(v, str) and 0 < len(v) <= 100]
+                        for k, values in raw.items()
+                        if isinstance(k, str)
+                        and KEY.fullmatch(k)
+                        and isinstance(values, list)
+                        and len(values) <= 30
+                    }
+                    self.keyword_stamp = stamp
+                index.update(self.keyword_cache)
+            except (OSError, ValueError, TypeError, AttributeError):
+                pass
+        index.update(self.known_keywords)
+        return index
+
+    async def search_templates(self, query=""):
+        keys = await self.keys()
+        index = await asyncio.to_thread(self.keywords)
+        needle = query.casefold()
+        return [
+            {"key": key, "keywords": index.get(key, [])}
+            for key in keys
+            if needle in key.casefold()
+            or any(needle in word.casefold() for word in index.get(key, []))
+        ]
+
+    async def resolve_template(self, name):
+        keys = await self.keys()
+        if name in keys:
+            return name
+        index = await asyncio.to_thread(self.keywords)
+        candidates = [key for key in keys if name in index.get(key, [])]
+        if len(candidates) != 1:
+            raise MediaError(
+                "模板关键词不存在或对应多个模板，请用 /meme list 关键词 查找唯一模板 ID"
+            )
+        return candidates[0]
 
     async def preview(self, key):
         await self.info(key)

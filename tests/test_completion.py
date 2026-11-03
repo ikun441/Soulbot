@@ -272,8 +272,9 @@ def test_global_memory_enters_every_llm_action_without_cross_scope_approval(s):
     assert all(m[1]["role"] == "user" for m in seen)
 
 
-def test_memory_tool_never_approves_or_invents_identity(s):
+def test_memory_tool_candidate_policy_never_approves_or_invents_identity(s):
     s.config.current.memory.enabled = True
+    s.config.current.memory.model_auto_save = False
     context = ToolContext(scope=evt().scope, event=evt())
     result = asyncio.run(s.tools.execute("save_memory", {"content": "明确的候选事实"}, context))
     row = s.memory.listing()["items"][0]

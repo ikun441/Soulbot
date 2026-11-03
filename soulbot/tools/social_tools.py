@@ -7,7 +7,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import Field, field_validator
 
-from soulbot.core.memory import MemoryCreate
+from soulbot.core.memory import MemoryKind
 from soulbot.services.config_service import Model
 from soulbot.services.qzone_service import DraftCreate
 from soulbot.services.search_service import SearchRequest
@@ -21,7 +21,10 @@ class MemoryQuery(Model):
 
 class SaveMemory(Model):
     content: str = Field(min_length=1, max_length=1000)
-    importance: int = Field(default=3, ge=1, le=5)
+    importance: int = Field(default=3, ge=1, le=5, strict=True)
+    kind: MemoryKind = "person"
+    confidence: float = Field(default=0.8, ge=0, le=1, allow_inf_nan=False)
+    expires_in_days: int = Field(default=365, ge=1, le=3650, strict=True)
 
 
 class DiscoverTools(Model):
@@ -67,23 +70,28 @@ def register_social_tools(s):
         current = event(context)
         if not s.memory.permitted(current):
             raise PermissionError("本会话记忆已关闭")
-        result = await asyncio.to_thread(
-            s.memory.create,
-            MemoryCreate(
-                bot_id=current.bot_id,
-                user_id=current.user_id,
-                group_id=current.group_id or "",
-                content=args.content,
-                importance=args.importance,
-                source="模型提出的待审核候选",
-                long_term_allowed=False,
-            ),
-            capture_scope=current.scope,
-        )
+        try:
+            result = await asyncio.to_thread(
+                s.memory.remember,
+                current,
+                args.content,
+                args.kind,
+                args.importance,
+                args.confidence,
+                args.expires_in_days,
+            )
+        except ValueError:
+            raise PermissionError("记忆保存未完成，请检查记忆开关、每日次数和候选数量") from None
+        active = result["item"]["status"] == "approved" and result["item"]["long_term_allowed"]
         return {
             "candidate_id": result["item"]["id"],
+            "memory_id": result["item"]["id"],
             "duplicate": result["duplicate"],
-            "message": "仅保存待审核候选；未授予长期保存授权，不能视为已生效的长期记忆。",
+            "status": result["item"]["status"],
+            "active": bool(active),
+            "message": "已存入统一记忆库，可供之后的任务检索。"
+            if active
+            else "已保存待审核候选；尚未作为生效记忆使用。",
         }
 
     def accessible(context):
@@ -168,13 +176,13 @@ def register_social_tools(s):
         ),
         (
             "retrieve_memory",
-            "检索当前 QQ 会话已审核并获授权的长期记忆；不能指定他人身份。",
+            "检索统一记忆库中的已授权记忆，私聊与群聊共同作为依据；支持分页。",
             MemoryQuery,
             retrieve,
         ),
         (
             "save_memory",
-            "提出当前会话的记忆候选，始终等待管理员核对和长期保存授权，不能自行批准。",
+            "主动记住重要事实，可设置类型、重要性、可信度和有效天数；生效或候选由管理员策略决定。",
             SaveMemory,
             save,
         ),

@@ -216,3 +216,17 @@
 Emoji 浏览与搜索支持 `category` 参数，模型工具包含 `list_emoji_categories` 和按分类分页的 `browse_emoji`。记忆审核可提交 `replace_target`，仅在来源作用域与目标 revision 一致时替换。
 
 插件元数据使用 `define.name`、`define.author`、`define.version`、`define.info`；工具经 Tool Registry 权限与参数验证，默认需要审批。GitHub 私有源凭据通过 `/api/secrets` 的 `plugin_github_token` 写入，普通读取只返回配置状态。完整 SDK 与市场索引格式见[插件开发规范](https://github.com/ikun441/soulbot_plugins/blob/main/PLUGIN_SPEC.md)。
+
+
+## v2.0.4 管理操作、共享记忆与频率
+
+`GET /api/plugins` 的插件条目新增 `admin_actions`（名称、标题、说明、参数 JSON Schema 与 mutating）；`POST /api/plugins/{id}/actions/{name}` 接收 `{revision, values, confirmed}`，需要管理员会话，写操作 confirmed=true。此接口不向模型开放，不接受任意命令名或 Shell。
+
+统一配置新增 `memory.shared=true`、`memory.model_auto_save=true`、`memory.max_model_writes_per_day=20`。记忆仍须启用总开关；来源关闭和删除继续有效。模型 save_memory 参数为 content、kind、importance、confidence、expires_in_days；输出 memory_id、status、active，只有 active 才可声称已生效，不能通过模型参数自行更改审核策略。
+
+频率新增 `behavior.passive_reply_probability=1`、`always_reply_mentions=true`、`natural_candidate_probability=0.08`、`active_candidate_probability=0.20`。原 `reply_cooldown_seconds`、`proactive_interval_seconds` 与 `max_proactive_per_day` 继续保存到同一 Schema。GroupPolicy 可用相同冷却/每日字段和 passive_reply_probability、proactive_probability 覆盖默认值，null 继承，0 是有效设置。
+
+模型 generate_meme 的 images 增加 avatar:bot、avatar:user、avatar:mentioned，只能由真实 QQ 上下文解释。QQ 命令与模型调用均复用模板校验、工具权限和生成速率；生成图片与平台发送回执分开。
+
+
+`experience_sampling` 配置包含 enabled（默认 true）、memory_items（6）、chat_items（8）、max_chars（4000）、chat_hours（24）。日记按指定日期和原时区取样，空间按近期窗口取样。`diary.ai_expression=true` 表示对前一日已归档的模板日记按原润色去重规则自动生成表达，不自动发送。只从仍保留且来源未关闭的聊天读取，不复制原始聊天到新表。

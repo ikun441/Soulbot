@@ -41,7 +41,12 @@ class ActionMemory:
             return {"local": [], "global": [], "scope": None, "enabled": False}
         event = event or current_event.get() or self.default_event(query)
         local = []
-        if event is not None and policy.local and self.s.memory.permitted(event):
+        if (
+            event is not None
+            and policy.local
+            and not cfg.memory.shared
+            and self.s.memory.permitted(event)
+        ):
             from dataclasses import replace
 
             local = self.s.memory.retrieve(replace(event, text=query[:1000]))
@@ -50,6 +55,7 @@ class ActionMemory:
             ]
         global_items = self.s.memory.action_context(query[:1000]) if policy.global_memory else []
         record = {
+            "mode": "shared" if cfg.memory.shared else "scoped",
             "operation": operation[:80],
             "scope": event.scope if event else None,
             "local_count": len(local),

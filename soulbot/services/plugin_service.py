@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import httpx
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from soulbot.core.social_state import StateConflict
 from soulbot.services.config_service import atomic_write
@@ -35,10 +35,59 @@ class PluginAPI:
     def __init__(self, manager, plugin_id):
         self.manager, self.id = manager, plugin_id
         self.tools = []
+        self.actions = {}
+        self.cleanup = None
 
     @property
     def params(self):
         return self.manager.parameters(self.id)
+
+    @property
+    def data_directory(self):
+        root = self.manager.s.root / "data" / "plugins"
+        path = root / self.id
+        if root.is_symlink() or path.is_symlink():
+            raise ValueError("插件数据路径不能使用符号链接")
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.chmod(0o700)
+        return path
+
+    def on_close(self, handler):
+        if self.cleanup is not None or not inspect.iscoroutinefunction(handler):
+            raise ValueError("只能注册一个异步清理回调")
+        self.cleanup = handler
+
+    def admin_action(
+        self, *, name, label, description, schema, handler, mutating=False, timeout=30
+    ):
+        if (
+            not re.fullmatch(PLUGIN_ID, name)
+            or name in self.actions
+            or not isinstance(label, str)
+            or not 1 <= len(label) <= 80
+            or not isinstance(description, str)
+            or not 1 <= len(description) <= 500
+            or not isinstance(schema, type)
+            or not issubclass(schema, BaseModel)
+            or not inspect.iscoroutinefunction(handler)
+            or type(mutating) is not bool
+            or type(timeout) not in {int, float}
+            or not 1 <= timeout <= 120
+            or len(self.actions) >= 12
+        ):
+            raise ValueError("插件管理操作声明无效")
+        checked = type(
+            "PluginAdmin_" + name, (schema,), {"model_config": ConfigDict(extra="forbid")}
+        )
+        self.actions[name] = {
+            "name": name,
+            "label": label,
+            "description": description,
+            "schema": checked,
+            "handler": handler,
+            "mutating": mutating,
+            "timeout": timeout,
+        }
 
     def tool(
         self, *, name, description, schema, handler, permission="approval", timeout=10, max_calls=2
@@ -106,6 +155,8 @@ class PluginService:
         self.secret_path = services.root / "data/plugin-secrets.json"
         self.secret_lock = threading.RLock()
         self.runtime = {}
+        self.admin = {}
+        self.cleanups = {}
         self.active = {}
         self.load_lock = asyncio.Lock()
         self.install_task = None
@@ -232,6 +283,14 @@ class PluginService:
                         "policy": state["policy"],
                         "revision": state["revision"],
                         "tools": [t.name for t, _, _ in self.runtime.get(folder.name, [])],
+                        "admin_actions": [
+                            {
+                                k: (v.model_json_schema() if k == "schema" else v)
+                                for k, v in action.items()
+                                if k not in {"handler", "timeout"}
+                            }
+                            for action in self.admin.get(folder.name, {}).values()
+                        ],
                     }
                 )
             except Exception:
@@ -345,8 +404,8 @@ class PluginService:
                 value = module.register(api)
                 if inspect.isawaitable(value):
                     raise ValueError("register 必须是同步函数")
-                if not api.tools:
-                    raise ValueError("插件没有注册工具")
+                if not api.tools and not api.actions:
+                    raise ValueError("插件没有注册工具或管理操作")
 
             try:
                 await asyncio.wait_for(asyncio.to_thread(load), 10)
@@ -366,6 +425,9 @@ class PluginService:
                         (plugin_id, digest, revision + 1),
                     )
                 self.runtime[plugin_id] = api.tools
+                self.admin[plugin_id] = api.actions
+                if api.cleanup:
+                    self.cleanups[plugin_id] = api.cleanup
                 for tool, _, _ in api.tools:
                     self.s.tools.register(tool)
                 self.apply_policy(plugin_id)
@@ -397,8 +459,49 @@ class PluginService:
         for task in jobs:
             task.cancel()
         await asyncio.gather(*jobs, return_exceptions=True)
+        await self.cleanup(plugin_id)
         self.s.db.audit("plugin_disabled", plugin_id)
         return {"ok": True, "enabled": False}
+
+    async def cleanup(self, plugin_id):
+        self.admin.pop(plugin_id, None)
+        callback = self.cleanups.pop(plugin_id, None)
+        if callback:
+            try:
+                await asyncio.wait_for(callback(), 20)
+            except Exception:
+                self.s.db.audit("plugin_cleanup_failed", plugin_id)
+
+    async def admin_execute(self, plugin_id, action_name, revision, values, confirmed):
+        if not await asyncio.to_thread(self.allowed, plugin_id):
+            raise MediaError("插件未启用或代码已变化，请刷新并核对")
+        if self.state(plugin_id)["revision"] != revision:
+            raise StateConflict("插件参数已变化，请刷新后重新操作")
+        action = self.admin.get(plugin_id, {}).get(action_name)
+        if not action:
+            raise MediaError("插件没有提供此管理操作")
+        if action["mutating"] and not confirmed:
+            raise MediaError("此操作需要管理员明确确认")
+        try:
+            args = action["schema"].model_validate(values)
+        except ValidationError:
+            raise MediaError("管理操作参数无效，请核对所选服务") from None
+        task = asyncio.current_task()
+        self.active.setdefault(plugin_id, set()).add(task)
+        self.s.db.audit("plugin_admin_started", plugin_id + ":" + action_name)
+        try:
+            result = await asyncio.wait_for(action["handler"](args), action["timeout"])
+            if len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode()) > 65536:
+                raise ValueError("result too large")
+            self.s.db.audit("plugin_admin_completed", plugin_id + ":" + action_name)
+            return result
+        except MediaError:
+            raise
+        except (ValueError, OSError, TimeoutError):
+            self.s.db.audit("plugin_admin_failed", plugin_id + ":" + action_name)
+            raise MediaError("管理操作未完成，请检查路径、端口、配置及脱敏日志") from None
+        finally:
+            self.active[plugin_id].discard(task)
 
     async def fetch(self, url, maximum=MAX_FILE):
         token = self.s.secrets.get("plugin_github_token")
@@ -545,4 +648,6 @@ class PluginService:
             for tool, _, _ in tools:
                 self.s.tools.tools.pop(tool.name, None)
                 self.s.tools.permissions.dynamic.pop(tool.name, None)
+        await asyncio.gather(*(self.cleanup(key) for key in list(self.cleanups)))
+        self.admin.clear()
         self.runtime.clear()

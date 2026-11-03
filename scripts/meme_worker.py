@@ -170,7 +170,13 @@ def load_extensions(root, settings):
     write(
         root / "loaded-templates.json",
         json.dumps(
-            {"version": VERSION, "origins": origins, "extensions": report}, ensure_ascii=False
+            {
+                "version": VERSION,
+                "origins": origins,
+                "extensions": report,
+                "keywords": {meme.key: meme.keywords for meme in manager.get_memes()},
+            },
+            ensure_ascii=False,
         ).encode(),
     )
 

@@ -73,8 +73,15 @@ class GenerateMeme(MemeKey):
     def image_ids(cls, values):
         import re
 
-        if any(not re.fullmatch(r"(?:emoji|media):[a-f0-9]{32}", value) for value in values):
-            raise ValueError("图片只能使用已存在的 emoji:ID 或 media:ID")
+        if any(
+            not re.fullmatch(
+                r"(?:(?:emoji|media):[a-f0-9]{32}|avatar:(?:bot|user|mentioned))", value
+            )
+            for value in values
+        ):
+            raise ValueError(
+                "图片只能使用 emoji:ID、media:ID 或当前 QQ 上下文的 avatar:bot / avatar:user / avatar:mentioned"
+            )
         return values
 
 
@@ -137,12 +144,13 @@ def register_media_tools(s):
         }
 
     async def templates(args):
-        keys = await s.meme.client.keys()
-        keys = [key for key in keys if args.query.casefold() in key.casefold()]
+        items = await s.meme.client.search_templates(args.query)
+        page = items[args.offset : args.offset + 20]
         return {
-            "total": len(keys),
-            "templates": keys[args.offset : args.offset + 20],
-            "note": "模板 ID；生成前调用 get_meme_info 验证数量和参数",
+            "total": len(items),
+            "templates": [item["key"] for item in page],
+            "items": page,
+            "note": "可按中文关键词或 ID 搜索；生成前读取 get_meme_info。",
         }
 
     async def info(args):
@@ -154,10 +162,31 @@ def register_media_tools(s):
         }
 
     async def generate(args, context):
-        images = [
-            await asyncio.to_thread(read_image, s, reference, context.scope)
-            for reference in args.images
-        ]
+        images = []
+        for reference in args.images:
+            if reference.startswith("avatar:"):
+                from soulbot.services.media_service import ImagePayload, inspect_image
+                from soulbot.services.qq_avatar import avatar
+
+                event = context.event
+                if event is None or event.scope != context.scope:
+                    raise PermissionError("头像输入需要服务端 QQ 上下文")
+                targets = (
+                    (event.bot_id,)
+                    if reference == "avatar:bot"
+                    else (event.user_id,)
+                    if reference == "avatar:user"
+                    else event.mentioned_users
+                )
+                if not targets:
+                    raise ValueError("当前消息没有 @ 对象")
+                for target in targets:
+                    data = await avatar(target)
+                    images.append(ImagePayload(data, inspect_image(data)[1]))
+            else:
+                images.append(await asyncio.to_thread(read_image, s, reference, context.scope))
+            if len(images) > 6:
+                raise ValueError("一次最多使用六张图片")
         content = await s.meme.client.generate(args.template, args.texts, images, args.args)
         result = await asyncio.to_thread(s.media.save, content, "meme", context.scope or "admin")
         return {
@@ -231,11 +260,16 @@ def register_media_tools(s):
             SelectEmoji,
             select,
         ),
-        ("list_meme_templates", "检索/分页列举 meme 模板英文 ID。", MemeSearch, templates),
+        (
+            "list_meme_templates",
+            "按中文关键词或 ID 检索并分页列举 meme 模板。",
+            MemeSearch,
+            templates,
+        ),
         ("get_meme_info", "读取模板图片/文字数量、默认文字和高级参数 Schema。", MemeKey, info),
         (
             "generate_meme",
-            "使用模板及已知图片 ID 生成一张拟发送图片；不下载用户网址。",
+            "自主选择模板生成拟发送表情；images 支持 avatar:bot（机器人）、avatar:user（当前用户）、avatar:mentioned（本次@对象）或素材 ID；不下载用户网址。",
             GenerateMeme,
             generate,
         ),

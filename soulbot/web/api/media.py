@@ -179,8 +179,7 @@ def install_media_api(app, s, authorized):
         query: str = Query(default="", max_length=100),
         offset: int = Query(default=0, ge=0, le=10000),
     ):
-        values = await s.meme.client.keys()
-        values = [key for key in values if query.casefold() in key.casefold()]
+        values = [item["key"] for item in await s.meme.client.search_templates(query)]
         return {"items": values[offset : offset + 60], "offset": offset, "total": len(values)}
 
     @app.get("/api/meme/templates/{key}", dependencies=protected)

@@ -242,3 +242,72 @@ def test_api_requires_auth_acknowledgement_and_does_not_echo_secret(s):
             == 200
         )
         assert c.post("/api/plugins/echo/disable", json={"revision": 2}).status_code == 200
+
+
+def admin_package(s):
+    root, _, _ = package(s)
+    (root / "plugin.py").write_text("""from pydantic import BaseModel
+class Args(BaseModel):
+    service: str
+
+def register(api):
+    async def inspect(args):
+        return {"message": args.service}
+    async def cleanup():
+        (api.data_directory / "closed").write_text("yes")
+    api.on_close(cleanup)
+    api.admin_action(name="start", label="启动", description="管理员启动服务",schema=Args,handler=inspect,mutating=True)
+""")
+    return root
+
+
+def test_admin_only_plugin_confirmation_revision_and_cleanup(s):
+    admin_package(s)
+    from soulbot.core.social_state import StateConflict
+
+    async def run():
+        await s.plugins.enable("echo", 0)
+        row = s.plugins.listing()["items"][0]
+        assert row["tools"] == [] and row["admin_actions"][0]["mutating"]
+        assert "handler" not in row["admin_actions"][0]
+        with pytest.raises(MediaError, match="明确确认"):
+            await s.plugins.admin_execute("echo", "start", 1, {"service": "fixture"}, False)
+        with pytest.raises(StateConflict):
+            await s.plugins.admin_execute("echo", "start", 0, {"service": "fixture"}, True)
+        with pytest.raises(MediaError, match="参数无效"):
+            await s.plugins.admin_execute(
+                "echo", "start", 1, {"service": "fixture", "command": "unsafe"}, True
+            )
+        assert await s.plugins.admin_execute("echo", "start", 1, {"service": "fixture"}, True) == {
+            "message": "fixture"
+        }
+        await s.plugins.disable("echo", 1)
+        assert (s.root / "data/plugins/echo/closed").read_text() == "yes"
+        with pytest.raises(MediaError):
+            await s.plugins.admin_execute("echo", "start", 2, {"service": "fixture"}, True)
+
+    asyncio.run(run())
+
+
+def test_admin_api_authentication_and_confirmation(s):
+    admin_package(s)
+    with TestClient(create_web_app(s.root, s), headers={"X-Soulbot-Request": "1"}) as c:
+        url = "/api/plugins/echo/actions/start"
+        assert (
+            c.post(
+                url, json={"revision": 1, "values": {"service": "fixture"}, "confirmed": True}
+            ).status_code
+            == 401
+        )
+        c.post(
+            "/api/auth/setup", json={"username": "fixture", "password": "admin-action-fixture-123"}
+        )
+        c.post(
+            "/api/plugins/echo/enable", json={"revision": 0, "acknowledge_python_execution": True}
+        )
+        assert (
+            c.post(url, json={"revision": 1, "values": {"service": "fixture"}}).status_code == 422
+        )
+        assert c.post(
+            url, json={"revision": 1, "values": {"service": "fixture"}, "confirmed": True}
+        ).json() == {"message": "fixture"}

@@ -160,6 +160,11 @@ class RequestLimits(Model):
 
 
 class GroupPolicy(Model):
+    passive_reply_probability: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    reply_cooldown_seconds: float | None = Field(default=None, ge=0, le=600, allow_inf_nan=False)
+    proactive_probability: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    proactive_interval_seconds: int | None = Field(default=None, ge=10, le=86400)
+    max_proactive_per_day: int | None = Field(default=None, ge=0, le=100)
     enabled: bool = True
     mode: Literal["silent", "mention_only", "natural", "active"] = "mention_only"
     allow_proactive: bool = False
@@ -177,6 +182,10 @@ class Personality(Model):
 class Behavior(Model):
     group_mode: Literal["silent", "mention_only", "natural", "active"] = "mention_only"
     private_chat: bool = True
+    passive_reply_probability: float = Field(default=1, ge=0, le=1, allow_inf_nan=False)
+    always_reply_mentions: bool = True
+    natural_candidate_probability: float = Field(default=0.08, ge=0, le=1, allow_inf_nan=False)
+    active_candidate_probability: float = Field(default=0.20, ge=0, le=1, allow_inf_nan=False)
     proactive_group_enabled: bool = False
     group_policies: dict[str, GroupPolicy] = Field(default_factory=dict)
     group_allowlist: list[str] = Field(default_factory=list, max_length=500)
@@ -187,8 +196,8 @@ class Behavior(Model):
     reply_cooldown_seconds: float = Field(default=8, ge=0, le=600, allow_inf_nan=False)
     group_batch_seconds: float = Field(default=5, ge=0, le=15, allow_inf_nan=False)
     private_batch_seconds: float = Field(default=0.4, ge=0, le=5, allow_inf_nan=False)
-    proactive_interval_seconds: int = Field(default=180, ge=180, le=86400)
-    max_proactive_per_day: int = Field(default=3, ge=0, le=10)
+    proactive_interval_seconds: int = Field(default=180, ge=10, le=86400)
+    max_proactive_per_day: int = Field(default=3, ge=0, le=100)
     global_send_interval_seconds: float = Field(default=1, ge=0.1, le=10, allow_inf_nan=False)
     split_long_replies: bool = True
     reply_sentences_per_message: int = Field(default=2, ge=1, le=5)
@@ -548,6 +557,7 @@ class QZoneSettings(Model):
 class DiarySettings(Model):
     enabled: bool = False
     live_preview: bool = True
+    ai_expression: bool = True
     auto_generate: bool = True
     weekly_enabled: bool = True
     delivery_mode: Literal["manual", "daily", "weekly"] = "manual"
@@ -573,9 +583,20 @@ class ProactiveSettings(Model):
 
 class MemorySettings(Model):
     enabled: bool = False
+    shared: bool = True
+    model_auto_save: bool = True
+    max_model_writes_per_day: int = Field(default=20, ge=1, le=200)
     global_context: bool = True
     max_items: int = Field(default=4, ge=1, le=10)
     max_chars: int = Field(default=1200, ge=200, le=4000)
+
+
+class ExperienceSampling(Model):
+    enabled: bool = True
+    memory_items: int = Field(default=6, ge=0, le=20)
+    chat_items: int = Field(default=8, ge=0, le=30)
+    max_chars: int = Field(default=4000, ge=500, le=12000)
+    chat_hours: int = Field(default=24, ge=1, le=168)
 
 
 class OnboardingSettings(Model):
@@ -666,6 +687,7 @@ class Settings(Model):
     automation: AutomationSettings = Field(default_factory=AutomationSettings)
     reflection: ReflectionSettings = Field(default_factory=ReflectionSettings)
     action_memory: ActionMemorySettings = Field(default_factory=ActionMemorySettings)
+    experience_sampling: ExperienceSampling = Field(default_factory=ExperienceSampling)
     plugins: PluginSettings = Field(default_factory=PluginSettings)
     onboarding: OnboardingSettings = Field(default_factory=OnboardingSettings)
 

@@ -34,6 +34,19 @@ class PluginRevision(Model):
     revision: int = Field(ge=0, strict=True)
 
 
+class PluginAction(Model):
+    revision: int = Field(ge=0, strict=True)
+    values: dict[str, Any] = Field(default_factory=dict, max_length=30)
+    confirmed: bool = Field(default=False, strict=True)
+
+    @field_validator("values")
+    @classmethod
+    def bounded(cls, value):
+        if len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode()) > 16384:
+            raise ValueError("操作参数过大")
+        return value
+
+
 class PluginInstall(Model):
     id: str = Field(pattern=PLUGIN_ID)
     commit: str = Field(pattern=r"^[a-f0-9]{40}$")
@@ -88,3 +101,9 @@ def install_plugins_api(app, s, authorized):
     @app.post("/api/plugins/{plugin_id}/disable", dependencies=protected)
     async def disable(plugin_id: str, data: PluginRevision):
         return await s.plugins.disable(plugin_id, data.revision)
+
+    @app.post("/api/plugins/{plugin_id}/actions/{action_name}", dependencies=protected)
+    async def action(plugin_id: str, action_name: str, data: PluginAction):
+        return await s.plugins.admin_execute(
+            plugin_id, action_name, data.revision, data.values, data.confirmed
+        )

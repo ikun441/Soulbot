@@ -260,6 +260,7 @@ def test_negative_feedback_limited_frozen_and_idempotent(s):
 
 
 def test_action_memory_checks_local_global_and_respects_optout(s):
+    s.config.current.memory.shared = False
     e = event()
     approve(s, "用户喜欢轻音乐", e)
     other = event(user="45678", group="56789")

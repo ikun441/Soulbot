@@ -1,4 +1,4 @@
-"""Consent-gated memory candidates, review and retrieval within a single QQ scope."""
+"""Unified memory with source attribution, optional scoped recall and server-owned write policy."""
 
 import hashlib
 import json
@@ -340,6 +340,8 @@ class MemoryEngine:
         if not self.permitted(event):
             return []
         policy = self.config.current.memory
+        if policy.shared and policy.global_context:
+            return self.action_context(event.text)
         with self.db.connect() as db:
             self.expire(db)
             rows = db.execute(
@@ -380,6 +382,64 @@ class MemoryEngine:
             result = candidate
             if len(result) >= policy.max_items:
                 break
+        return result
+
+    def remember(self, event, content, kind, importance, confidence, expires_in_days):
+        """A model supplies facts/attributes; the administrator's policy supplies authorization."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        policy = self.config.current.memory
+        if not self.permitted(event):
+            raise ValueError("记忆功能或当前来源的记忆采集已关闭")
+        day = (
+            datetime.fromtimestamp(self.clock(), ZoneInfo(self.config.current.soulbot.timezone))
+            .date()
+            .isoformat()
+        )
+        key = "model_memory_writes:" + day
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
+            count = int(row[0]) if row else 0
+            if count >= policy.max_model_writes_per_day:
+                raise ValueError("模型主动记忆已达今日次数限制")
+            db.execute("INSERT OR REPLACE INTO metadata VALUES (?,?)", (key, str(count + 1)))
+        result = self.create(
+            MemoryCreate(
+                bot_id=event.bot_id,
+                user_id=event.user_id,
+                group_id=event.group_id or "",
+                content=content,
+                kind=kind,
+                importance=importance,
+                confidence=confidence,
+                source="模型主动记忆；来源消息：" + event.message_id[:60],
+                expires_at=self.clock() + expires_in_days * 86400,
+                long_term_allowed=False,
+            ),
+            capture_scope=event.scope,
+        )
+        if result["duplicate"] or not policy.model_auto_save:
+            return result
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            preference = db.execute(
+                "SELECT enabled FROM memory_preferences WHERE scope=?", (event.scope,)
+            ).fetchone()
+            if (
+                self.config.current.memory.enabled
+                and self.config.current.memory.model_auto_save
+                and not (preference and not preference[0])
+            ):
+                db.execute(
+                    "UPDATE memories SET status='approved',long_term_allowed=1,revision=revision+1,updated_at=? WHERE id=? AND status='candidate' AND revision=?",
+                    (self.clock(), result["item"]["id"], result["item"]["revision"]),
+                )
+            result["item"] = self.row(
+                db.execute("SELECT * FROM memories WHERE id=?", (result["item"]["id"],)).fetchone()
+            )
+        self.db.audit("model_memory_saved", result["item"]["status"])
         return result
 
     def propose(self, event, item, evidence, job_id):

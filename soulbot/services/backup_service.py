@@ -309,6 +309,17 @@ class BackupService:
                             "UPDATE plugin_settings SET enabled=CASE WHEN ?=0 THEN 0 ELSE enabled END,policy=CASE WHEN ?='deny' THEN 'deny' ELSE policy END,revision=MAX(revision,?)+1 WHERE id=?",
                             (enabled, policy, revision, identity),
                         )
+                # Memory write behavior limits also survive restoring an older snapshot.
+                for key, value in source.execute(
+                    "SELECT key,value FROM metadata WHERE key LIKE 'model_memory_writes:%'"
+                ):
+                    previous = target.execute(
+                        "SELECT value FROM metadata WHERE key=?", (key,)
+                    ).fetchone()
+                    target.execute(
+                        "INSERT OR REPLACE INTO metadata VALUES (?,?)",
+                        (key, str(max(int(value), int(previous[0]) if previous else 0))),
+                    )
                 # Never resume analysis of private text from an old snapshot.
                 target.execute(
                     "UPDATE reflection_jobs SET status='cancelled',input_text='',result_json='{}' WHERE status IN ('queued','running')"

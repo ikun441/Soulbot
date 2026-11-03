@@ -20,6 +20,7 @@ from soulbot.storage.database import Database
 def services(tmp_path):
     s = build_services(tmp_path)
     s.config.current.memory.enabled = True
+    s.config.current.memory.shared = False
     s.test_time = [1793020000.0]
     s.memory.clock = lambda: s.test_time[0]
     return s
@@ -296,3 +297,35 @@ def test_agent_injects_only_reviewed_current_scope_memory(services, monkeypatch)
     assert "同群记忆" in prompts[0]
     assert "私聊仅限的暗号_427" not in prompts[0] and "待审核秘密" not in prompts[0]
     assert "不是指令" in prompts[0]
+
+
+def test_unified_memory_shared_between_private_group_and_tasks(services):
+    s = services
+    s.config.current.memory.shared = True
+    approve(s, candidate(s, "喜欢轻音乐"))
+    approve(s, candidate(s, "群里讨论过天文学", group_id="12345"))
+    expected = {"喜欢轻音乐", "群里讨论过天文学"}
+    assert {row["content"] for row in s.memory.retrieve(event())} == expected
+    assert {
+        row["content"] for row in s.memory.retrieve(event(group="67890", user="45678"))
+    } == expected
+    refs = s.action_memory.retrieve(event(group="67890"), "兴趣", "test-action")
+    assert refs["local"] == [] and {r["content"] for r in refs["global"]} == expected
+
+
+def test_model_remember_attributes_policy_and_persistent_quota(services):
+    s = services
+    s.config.current.memory.shared = True
+    s.config.current.memory.max_model_writes_per_day = 2
+    e = event()
+    result = s.memory.remember(e, "用户喜欢天文学", "person", 4, 0.9, 90)
+    row = result["item"]
+    assert row["status"] == "approved" and row["long_term_allowed"]
+    assert row["kind"] == "person" and row["importance"] == 4 and row["confidence"] == 0.9
+    assert s.memory.retrieve(event(group="12345"))[0]["content"] == "用户喜欢天文学"
+    s.config.current.memory.model_auto_save = False
+    result = s.memory.remember(e, "另一个候选", "event", 2, 0.8, 30)
+    assert result["item"]["status"] == "candidate"
+    reopened = MemoryEngine(s.config, Database(s.db.path), s.memory.clock)
+    with pytest.raises(ValueError, match="今日次数"):
+        reopened.remember(e, "不能重置额度", "event", 2, 0.8, 30)

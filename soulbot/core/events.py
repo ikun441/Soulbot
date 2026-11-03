@@ -14,6 +14,7 @@ class ChatEvent:
     is_bot: bool = False
     role: str = "member"
     record_file: str | None = None
+    mentioned_users: tuple[str, ...] = ()
 
     @property
     def scope(self):

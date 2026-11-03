@@ -43,6 +43,13 @@ def normalize(event: MessageEvent, known_bot_ids=()):
         directed=event.is_tome() or bot_id in mentions,
         reply_target=reply,
         mentions_other=any(value not in {bot_id, "all", ""} for value in mentions),
+        mentioned_users=tuple(
+            dict.fromkeys(
+                value
+                for value in mentions
+                if value != bot_id and re.fullmatch(r"[1-9][0-9]{4,11}", value)
+            )
+        )[:7],
         is_bot=user_id in known_bot_ids or bool(getattr(event.sender, "is_bot", False)),
         role=event.sender.role or "member",
         record_file=str(recordings[0].data.get("file", "")) if len(recordings) == 1 else None,
