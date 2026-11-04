@@ -3,9 +3,10 @@ from typing import Any, Awaitable, Callable
 
 
 class ProviderError(Exception):
-    def __init__(self, kind: str, message: str, *, retryable=False, uncertain=False):
+    def __init__(self, kind: str, message: str, *, retryable=False, uncertain=False, usage=None):
         super().__init__(message)
         self.kind, self.retryable, self.uncertain = kind, retryable, uncertain
+        self.usage = usage
 
 
 @dataclass

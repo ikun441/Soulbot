@@ -111,6 +111,9 @@ class LLMEndpoint(Model):
     streaming: bool = False
     supports_tools: bool = False
     supports_vision: bool = False
+    reasoning_effort: Literal[
+        "provider", "none", "minimal", "low", "medium", "high", "xhigh", "max"
+    ] = "provider"
     stream_usage: bool = False
     max_output_field: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
     input_price_cny_per_million: float | None = Field(

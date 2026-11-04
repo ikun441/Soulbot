@@ -251,3 +251,14 @@ GET `/api/identities?query=` 为管理员提供账号、平台昵称、群名片
 表情上传使用原生下拉选择分类，分页读取完整分类列表、保留选择，新增分类自动选中。POST `/api/emoji/upload` 的 multipart `category` 长度上限120，支持合法已存在子分类；新增普通分类继续使用分类管理接口。拒绝隐藏路径、目录跳转、符号链接和不存在的子分类。
 
 上游契约核对：[NapCat 文件处理](https://napneko.github.io/develop/file)、[DeepSeek Chat Completions 图片输入](https://api-docs.deepseek.com/api/create-chat-completion/)。不根据模型名字猜测能力，视觉与工具能力按实际配置路由。
+
+
+## v2.1.1 推理模型与结束原因
+
+`llm.reasoning_effort` 和 `llm.fallbacks.<id>.reasoning_effort` 可选 `provider`（默认，不传参数）、`none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。管理员须按对应模型支持情况选择；错误取值不会伪装成能力支持。可在模型页保存，立即影响后续请求。DeepSeek参数依据：[官方Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)。
+
+普通及流式响应 `finish_reason=length` 返回 `output_limit`，`content_filter` 返回同名错误，`aborted/insufficient_system_resource` 返回 `generation_interrupted`。不返回截断的工具参数供执行。普通响应在发送文本前检查，流式试聊可能已显示部分文字，但最终明确失败，不能将其视为完整回答。错误通过现有502响应返回 `detail/kind/uncertain`，不返回推理正文。
+
+有有效usage的上述失败以及流式中断，`llm_usage`保存 `status=failed`、真实输入/输出/推理Token、estimated=0及可计算费用。缺少usage时仍为uncertain并保留估算；费用未知不记为免费。每次尝试计入任务统计，截断不会在同服务自动重试。
+
+连接、工具及视觉验证各自的输出请求上限为512，最终由实例单次输出上限、模型上下文共同裁剪，不绕过已配置上限。视觉验证通过只保存 `supports_vision=true`，不会自动打开 `vision.enabled`。

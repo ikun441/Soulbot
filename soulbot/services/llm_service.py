@@ -130,7 +130,7 @@ class LLMService:
                     },
                 }
             ],
-            output_limit=128,
+            output_limit=512,
         )
         import json
 
@@ -432,7 +432,16 @@ class LLMService:
                         )
                         raise
                     except ProviderError as error:
-                        await asyncio.to_thread(self.budget.failed, key, error)
+                        await asyncio.to_thread(self.budget.failed, key, error, endpoint)
+                        if error.usage is not None:
+                            total += (
+                                error.usage.input_tokens
+                                + error.usage.output_tokens
+                                - amount
+                                - maximum
+                            )
+                            if task_state is not None:
+                                task_state["tokens"] = total
                         await asyncio.to_thread(self.audit, "llm_failed", name + ":" + error.kind)
                         last_error = error
                         if emitted:

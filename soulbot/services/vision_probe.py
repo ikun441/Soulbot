@@ -45,7 +45,7 @@ async def verify_vision(service):
                 "content": [
                     {
                         "type": "text",
-                        "text": "识别图片左右两个色块的颜色。只输出 JSON，left/right 对应颜色的英文小写名称。",
+                        "text": "识别图片左右两个色块的颜色。只输出 JSON，left/right 对应颜色的英文小写名称。颜色仅从 red、blue、green、yellow、black、white、purple、orange 选择。",
                     },
                     content_part(stream.getvalue()),
                 ],
@@ -53,7 +53,7 @@ async def verify_vision(service):
         ],
         purpose="admin_vision_test",
         tools=[],
-        output_limit=128,
+        output_limit=512,
         include_memory=False,
     )
     text = result.text.strip()

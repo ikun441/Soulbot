@@ -16,6 +16,9 @@ const guidance = {
  network: ['网络连接失败', '检查 Base URL、DNS、代理和网络连接；先查看用量记录再重试。'],
  unavailable: ['服务暂不可用', '稍后查看服务商状态；请求可能已经到达服务端，请先核对用量。'],
  internal: ['请求未能完成', '查看 SoulBot 操作记录和用量页面；若费用不确定，先核对服务商账单。'],
+ output_limit: ['模型输出被截断', '推理也会占用输出额度。在 AI 模型页降低支持的思考强度，或提高单次输出上限后重试。'],
+ content_filter: ['服务商未返回内容', '调整输入后重试，不能将这次请求视作成功回复。'],
+ generation_interrupted: ['模型生成被中断', '服务商中止了生成，本轮工具请求未执行；请核对用量后重试。'],
  invalid_response: ['服务返回内容不兼容', '检查模型和接口类型；确认服务返回符合所选能力的格式。'],
  format: ['返回格式无效', '确认模型支持所选音频或图片格式，再检查服务端响应设置。'],
  size: ['响应超过本地限制', '降低输出尺寸或时长后重试；服务端可能已生成并计费。'],
@@ -33,7 +36,7 @@ const guidance = {
 };
 
 const mayHaveCharged = new Set([
- 'timeout', 'cancelled', 'network', 'unavailable', 'internal', 'invalid_response', 'format', 'size', 'url_only', 'invalid',
+ 'output_limit', 'content_filter', 'generation_interrupted', 'timeout', 'cancelled', 'network', 'unavailable', 'internal', 'invalid_response', 'format', 'size', 'url_only', 'invalid',
 ]);
 
 export function providerErrorText(

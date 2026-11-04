@@ -120,9 +120,22 @@ class BudgetService:
                     (usage.input_tokens, usage.output_tokens, usage.reasoning_tokens, cost, key),
                 )
 
-    def failed(self, key, error):
+    def failed(self, key, error, endpoint=None):
         with self.db.connect() as db:
-            if error.uncertain:
+            if error.usage is not None and endpoint is not None:
+                usage = error.usage
+                db.execute(
+                    "UPDATE llm_usage SET status='failed',error_kind=?,input_tokens=?,output_tokens=?,reasoning_tokens=?,estimated=0,cost_cny=? WHERE id=?",
+                    (
+                        error.kind,
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.reasoning_tokens,
+                        self.price(endpoint, usage.input_tokens, usage.output_tokens),
+                        key,
+                    ),
+                )
+            elif error.uncertain:
                 db.execute(
                     "UPDATE llm_usage SET status='uncertain',error_kind=? WHERE id=?",
                     (error.kind, key),

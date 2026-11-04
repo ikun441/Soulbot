@@ -30,6 +30,30 @@ def parse_usage(value):
         ) from None
 
 
+def check_finish(reason, usage=None):
+    if reason == "length":
+        raise ProviderError(
+            "output_limit",
+            "模型输出达到长度上限，未完成回复或工具调用。推理也可能占用输出额度；请提高单次输出上限，或按模型支持情况降低思考强度后重试。",
+            uncertain=True,
+            usage=usage,
+        )
+    if reason == "content_filter":
+        raise ProviderError(
+            "content_filter",
+            "服务商未返回可用内容，请调整输入后再试。",
+            uncertain=True,
+            usage=usage,
+        )
+    if reason in {"aborted", "insufficient_system_resource"}:
+        raise ProviderError(
+            "generation_interrupted",
+            "模型生成被服务商中断，未执行本轮工具请求；请稍后重试。",
+            uncertain=True,
+            usage=usage,
+        )
+
+
 def parse_calls(calls):
     if not calls:
         return []
@@ -166,6 +190,8 @@ class OpenAICompatibleProvider:
             self.settings.max_output_field: maximum,
             "stream": streaming,
         }
+        if self.settings.reasoning_effort != "provider":
+            payload["reasoning_effort"] = self.settings.reasoning_effort
         if streaming and self.settings.stream_usage:
             payload["stream_options"] = {"include_usage": True}
         if tools:
@@ -183,6 +209,8 @@ class OpenAICompatibleProvider:
                         value = json.loads(await self.read_body(response))
                         choice = value["choices"][0]
                         message = choice["message"]
+                        usage = parse_usage(value.get("usage"))
+                        check_finish(choice.get("finish_reason"), usage)
                         text = message.get("content") or ""
                         if not isinstance(text, str):
                             raise ValueError
@@ -193,7 +221,7 @@ class OpenAICompatibleProvider:
                             await on_delta(text)
                         return Completion(
                             text,
-                            parse_usage(value.get("usage")),
+                            usage,
                             calls,
                             model=self.settings.model,
                             finish_reason=choice.get("finish_reason"),
@@ -212,6 +240,7 @@ class OpenAICompatibleProvider:
     async def stream(self, response, on_delta):
         text, calls, usage, size, finished = [], {}, None, 0, False
         data_lines = []
+        finish_reason = None
         async for line in response.aiter_lines():
             size += len(line.encode("utf-8"))
             if size > MAX_BODY:
@@ -234,6 +263,8 @@ class OpenAICompatibleProvider:
             for choice in chunk.get("choices", []):
                 if choice.get("index", 0) != 0:
                     continue
+                if choice.get("finish_reason") is not None:
+                    finish_reason = choice["finish_reason"]
                 delta = choice.get("delta") or {}
                 content = delta.get("content") or ""
                 if not isinstance(content, str):
@@ -256,8 +287,21 @@ class OpenAICompatibleProvider:
                         target["function"][key] += (item.get("function") or {}).get(key) or ""
         if not finished:
             raise ProviderError(
-                "stream_interrupted", "流式响应未正常结束，用量已保守保留", uncertain=True
+                "stream_interrupted",
+                "流式响应未正常结束，用量已保守保留",
+                uncertain=True,
+                usage=usage,
+            )
+        check_finish(finish_reason, usage)
+        checked_calls = parse_calls(list(calls.values()))
+        if not text and not checked_calls:
+            raise ProviderError(
+                "invalid_response", "模型未返回可用回复或工具请求", uncertain=True, usage=usage
             )
         return Completion(
-            "".join(text), usage, parse_calls(list(calls.values())), model=self.settings.model
+            "".join(text),
+            usage,
+            checked_calls,
+            model=self.settings.model,
+            finish_reason=finish_reason,
         )

@@ -54,7 +54,7 @@ def install_chat_api(app, s, authorized):
         settings, credentials = s.llm.test_inputs()
         try:
             result = await s.llm.complete(
-                [{"role": "user", "content": "请仅回复：连接成功"}], purpose="test", output_limit=32
+                [{"role": "user", "content": "请仅回复：连接成功"}], purpose="test", output_limit=512
             )
         except ProviderError as error:
             s.llm.record_test(settings, credentials, ok=False, error_kind=error.kind)
