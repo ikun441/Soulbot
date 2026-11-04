@@ -27,6 +27,16 @@ class SaveMemory(Model):
     expires_in_days: int = Field(default=365, ge=1, le=3650, strict=True)
 
 
+class UpdateMemory(Model):
+    memory_id: int = Field(ge=1, strict=True)
+    revision: int = Field(ge=0, strict=True)
+    content: str | None = Field(default=None, min_length=1, max_length=1000)
+    importance: int | None = Field(default=None, ge=1, le=5, strict=True)
+    confidence: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    kind: MemoryKind | None = None
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650, strict=True)
+
+
 class DiscoverTools(Model):
     names: list[str] = Field(min_length=1, max_length=3)
 
@@ -93,6 +103,15 @@ def register_social_tools(s):
             if active
             else "已保存待审核候选；尚未作为生效记忆使用。",
         }
+
+    async def update_memory(args, context):
+        current = event(context)
+        changes = args.model_dump(exclude={"memory_id", "revision"}, exclude_none=True)
+        if not changes:
+            raise ValueError("至少指定一个需要修改的字段")
+        return await asyncio.to_thread(
+            s.memory.update_from_model, current, args.memory_id, args.revision, changes
+        )
 
     def accessible(context):
         current = event(context)
@@ -179,6 +198,12 @@ def register_social_tools(s):
             "检索统一记忆库中的已授权记忆，私聊与群聊共同作为依据；支持分页。",
             MemoryQuery,
             retrieve,
+        ),
+        (
+            "update_memory",
+            "使用检索返回的 memory_id 与 revision 修改记忆事实或属性；不能伪造身份或覆盖新的修订。",
+            UpdateMemory,
+            update_memory,
         ),
         (
             "save_memory",

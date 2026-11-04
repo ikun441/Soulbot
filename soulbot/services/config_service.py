@@ -193,7 +193,7 @@ class Behavior(Model):
     ignored_bot_ids: list[str] = Field(default_factory=list, max_length=500)
     wake_words: list[str] = Field(default_factory=list, max_length=10)
     followup_window_seconds: int = Field(default=90, ge=0, le=300)
-    reply_cooldown_seconds: float = Field(default=8, ge=0, le=600, allow_inf_nan=False)
+    reply_cooldown_seconds: float = Field(default=0, ge=0, le=600, allow_inf_nan=False)
     group_batch_seconds: float = Field(default=5, ge=0, le=15, allow_inf_nan=False)
     private_batch_seconds: float = Field(default=0.4, ge=0, le=5, allow_inf_nan=False)
     proactive_interval_seconds: int = Field(default=180, ge=10, le=86400)
@@ -323,6 +323,7 @@ class MediaToolPolicies(Model):
     browse_memory: Literal["deny", "auto", "approval"] = "auto"
     retrieve_memory: Literal["deny", "auto", "approval"] = "auto"
     save_memory: Literal["deny", "auto", "approval"] = "auto"
+    update_memory: Literal["deny", "auto", "approval"] = "auto"
     list_emoji_categories: Literal["deny", "auto", "approval"] = "auto"
     search_emoji: Literal["deny", "auto", "approval"] = "auto"
     browse_emoji: Literal["deny", "auto", "approval"] = "auto"

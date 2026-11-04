@@ -299,6 +299,7 @@ class MemoryEngine:
                     "kind": r["kind"],
                     "importance": r["importance"],
                     "confidence": r["confidence"],
+                    "revision": r["revision"],
                     "visibility": "group" if r["group_id"] else "private",
                     "source_scope": f"{r['bot_id']}:g:{r['group_id']}:u:{r['user_id']}"
                     if r["group_id"]
@@ -493,3 +494,59 @@ class MemoryEngine:
             if row:
                 result["item"] = self.row(row)
         return result
+
+    def update_from_model(self, event, memory_id, revision, changes):
+        if not self.permitted(event):
+            raise PermissionError("记忆已关闭")
+        with self.db.connect() as db:
+            row = db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
+        if not row:
+            raise ValueError("记忆不存在")
+        if row["bot_id"] != event.bot_id or not (
+            event.user_id == self.config.current.personality.owner_qq
+            or (row["user_id"] == event.user_id and row["group_id"] == (event.group_id or ""))
+        ):
+            raise PermissionError("当前用户不能修改其他人的记忆，请由主人操作")
+        if row["revision"] != revision:
+            raise StateConflict("记忆已更新，请重新检索")
+        values = {
+            key: row[key]
+            for key in (
+                "content",
+                "source",
+                "kind",
+                "importance",
+                "confidence",
+                "expires_at",
+                "long_term_allowed",
+            )
+        }
+        expires = changes.pop("expires_in_days", None)
+        values.update(changes)
+        if expires is not None:
+            values["expires_at"] = self.clock() + expires * 86400
+        checked = MemoryEdit(**values, revision=revision, status=row["status"])
+        # The server chooses direct-update authority; otherwise preserve the original and propose an update.
+        if not self.config.current.memory.model_auto_save:
+            result = self.create(
+                MemoryCreate(
+                    bot_id=row["bot_id"],
+                    user_id=row["user_id"],
+                    group_id=row["group_id"],
+                    **{**values, "long_term_allowed": False},
+                )
+            )
+            if not result["duplicate"]:
+                with self.db.connect() as db:
+                    db.execute(
+                        "UPDATE memories SET proposed_target_id=?,proposed_target_revision=? WHERE id=?",
+                        (memory_id, revision, result["item"]["id"]),
+                    )
+            return {"memory_id": result["item"]["id"], "status": "candidate", "active": False}
+        updated = self.edit(memory_id, checked)
+        return {
+            "memory_id": updated["id"],
+            "revision": updated["revision"],
+            "status": updated["status"],
+            "active": updated["status"] == "approved",
+        }

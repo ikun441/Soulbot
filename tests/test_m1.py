@@ -235,7 +235,7 @@ def test_database_migrates_old_schema_without_losing_metadata(tmp_path):
     db = Database(tmp_path / "data" / "soulbot.db")
     db.set("wizard_step", "5")
     reopened = Database(tmp_path / "data" / "soulbot.db")
-    assert reopened.get("schema_version") == "17"
+    assert reopened.get("schema_version") == "18"
     assert reopened.get("wizard_step") == "5"
     with reopened.connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 0
@@ -243,7 +243,9 @@ def test_database_migrates_old_schema_without_losing_metadata(tmp_path):
 
 def test_group_filtering_and_persisted_mute_and_cooldown(tmp_path):
     db = Database(tmp_path / "data" / "soulbot.db")
-    config = Settings.model_validate({"qq": {"enabled": True}, "behavior": {"quiet_hours": False}})
+    config = Settings.model_validate(
+        {"qq": {"enabled": True}, "behavior": {"quiet_hours": False, "reply_cooldown_seconds": 8}}
+    )
     now = [1_800_000_000.0]
     store = ConversationStore(db, clock=lambda: now[0])
     decision = DecisionEngine(db, store, clock=lambda: now[0], rng=lambda: 1.0)

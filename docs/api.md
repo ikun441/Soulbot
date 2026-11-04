@@ -230,3 +230,10 @@ Emoji 浏览与搜索支持 `category` 参数，模型工具包含 `list_emoji_c
 
 
 `experience_sampling` 配置包含 enabled（默认 true）、memory_items（6）、chat_items（8）、max_chars（4000）、chat_hours（24）。日记按指定日期和原时区取样，空间按近期窗口取样。`diary.ai_expression=true` 表示对前一日已归档的模板日记按原润色去重规则自动生成表达，不自动发送。只从仍保留且来源未关闭的聊天读取，不复制原始聊天到新表。
+
+
+## v2.0.5 身份与记忆更新
+
+GET `/api/identities?query=` 为管理员提供账号、平台昵称、群名片、群、称呼和好感度映射。主人身份按 QQ 号匹配，平台昵称和名片不授予权限。SQLite 增量迁移至 v18。
+
+`update_memory` 参数为 memory_id、revision 及可选 content、kind、importance、confidence、expires_in_days。身份由服务端上下文确定，普通用户限本人来源，主人可跨来源编辑；旧 revision 拒绝覆盖。默认回复冷却 0 秒。

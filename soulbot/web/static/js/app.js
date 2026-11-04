@@ -66,15 +66,15 @@ function badge(text, kind = '') {return `<span class="badge ${kind}">${esc(text)
 function get(path) { return path.split('.').reduce((o,k) => o?.[k], C); }
 function set(path, value) {const keys = path.split('.'); const last = keys.pop(); keys.reduce((o,k) => o[k], C)[last] = value;}
 function field(label, path, help = '', type = 'text', extra = '', full = false) {
- return `<div class="field ${full ? 'full' : ''}"><label for="${path}">${label}</label><input id="${path}" data-field="${path}" type="${type}" value="${esc(get(path))}" ${extra}>${help ? `<small>${help}</small>` : ''}</div>`;
+ return `<div class="field ${full ? 'full' : ''}"><label for="${path}">${label}</label><input id="${path}" data-field="${path}" type="${type}" value="${esc(get(path))}" ${extra} ${get(path)===undefined?'disabled data-unsupported="true"':''}>${help ? `<small>${help}</small>` : ''}</div>`;
 }
 function textarea(label, path, help = '', max = 2000) {return `<div class="field full"><label for="${path}">${label}</label><textarea id="${path}" data-field="${path}" maxlength="${max}">${esc(get(path))}</textarea><small>${help}</small></div>`;}
 function secret(label, name, help) {return `<div class="field"><label for="${name}">${label} ${badge(S[name] ? '已配置' : '未配置')}</label><input type="password" id="${name}" data-secret="${name}" maxlength="16384" autocomplete="new-password" placeholder="留空保留已有密钥"><small>${help}</small></div>`;}
-function select(label, path, options, help = '') {return `<div class="field"><label for="${path}">${label}</label><select id="${path}" data-field="${path}">${options.map(([value, text]) => `<option value="${value}" ${get(path) === value ? 'selected' : ''}>${text}</option>`).join('')}</select><small>${help}</small></div>`;}
-function toggle(label, path, help) {return `<label class="switch-row"><span><strong>${label}</strong><span class="row-detail">${help}</span></span><input type="checkbox" data-field="${path}" ${get(path) ? 'checked' : ''}></label>`;}
+function select(label, path, options, help = '') {return `<div class="field"><label for="${path}">${label}</label><select id="${path}" data-field="${path}" ${get(path)===undefined?'disabled data-unsupported="true"':''}>${options.map(([value, text]) => `<option value="${value}" ${get(path) === value ? 'selected' : ''}>${text}</option>`).join('')}</select><small>${help}</small></div>`;}
+function toggle(label, path, help) {return `<label class="switch-row"><span><strong>${label}</strong><span class="row-detail">${help}</span></span><input type="checkbox" data-field="${path}" ${get(path)===undefined?'disabled data-unsupported="true"':''} ${get(path) ? 'checked' : ''}></label>`;}
 function collect() {
  const form = $('#editor'); if (form && !form.reportValidity()) return false;
- document.querySelectorAll('[data-field]').forEach(input => {set(input.dataset.field, input.dataset.list ? input.value.split(/[,，\n]/).map(v=>v.trim()).filter(Boolean) : input.type === 'checkbox' ? input.checked : input.type === 'number' ? (input.dataset.nullable && input.value === '' ? null : Number(input.value)) : input.value);});
+ document.querySelectorAll('[data-field]:not(:disabled)').forEach(input => {set(input.dataset.field, input.dataset.list ? input.value.split(/[,，\n]/).map(v=>v.trim()).filter(Boolean) : input.type === 'checkbox' ? input.checked : input.type === 'number' ? (input.dataset.nullable && input.value === '' ? null : Number(input.value)) : input.value);});
  return true;
 }
 async function saveEditor() {
@@ -125,7 +125,12 @@ function mount(html) {
  $('#main').innerHTML = html; updateNav(); revealPage($('#main'));
  window.scrollTo({top:0,behavior:'instant'});
  $('#main').querySelectorAll('input,textarea,select').forEach(input => input.addEventListener('input', () => {if(!input.closest('#chat-form')&&!input.closest('[data-transient]'))dirty = true;}));
- const editor = $('#editor'); if (editor) editor.addEventListener('submit', e => {e.preventDefault(); guarded(saveEditor, $('#save'));});
+ const editor = $('#editor');
+ if (editor) {
+  editor.addEventListener('submit',e=>{e.preventDefault();guarded(saveEditor,$('#save'));});
+  editor.addEventListener('invalid',e=>{let parent=e.target.parentElement;while(parent&&parent!==editor){if(parent.tagName==='DETAILS')parent.open=true;parent=parent.parentElement;}notice('请检查“'+(document.getElementById(e.target.id)?.labels?.[0]?.textContent||e.target.dataset.field||'设置项')+'”：'+e.target.validationMessage,true);},true);
+  if(editor.querySelector('[data-unsupported]'))editor.insertAdjacentHTML('afterbegin','<p class="note" role="status">后台尚未加载部分新增设置，相关项目暂不可编辑。请重启 SoulBot 后刷新页面；其他设置仍可保存。</p>');
+ }
 }
 function renderLogin() {
  page = 'login'; mount(`${heading('WELCOME BACK','欢迎回到你的小小宇宙。','登录管理员账户，继续照顾 SoulBot 的每一个细节。')}<form class="panel auth-panel" id="login-form"><h2>管理员登录</h2><div class="field"><label for="username">用户名</label><input id="username" name="username" required autocomplete="username" maxlength="40"></div><div class="field"><label for="password">密码</label><input id="password" name="password" type="password" required autocomplete="current-password" maxlength="128"></div><div class="actions"><button class="button primary" type="submit">进入我的空间 ${icon('arrow')}</button></div><p class="note">管理会话有效期为 12 小时。忘记密码请参考 README.md；请勿把 data 目录分享给他人。</p></form>`);

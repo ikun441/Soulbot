@@ -15,6 +15,9 @@ class ChatEvent:
     role: str = "member"
     record_file: str | None = None
     mentioned_users: tuple[str, ...] = ()
+    user_name: str = ""
+    group_card: str = ""
+    group_name: str = ""
 
     @property
     def scope(self):

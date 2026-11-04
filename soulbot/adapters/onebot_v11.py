@@ -52,6 +52,9 @@ def normalize(event: MessageEvent, known_bot_ids=()):
         )[:7],
         is_bot=user_id in known_bot_ids or bool(getattr(event.sender, "is_bot", False)),
         role=event.sender.role or "member",
+        user_name=str(event.sender.nickname or "")[:100],
+        group_card=str(getattr(event.sender, "card", "") or "")[:100],
+        group_name=str(getattr(event, "group_name", "") or "")[:100],
         record_file=str(recordings[0].data.get("file", "")) if len(recordings) == 1 else None,
     )
 
@@ -187,11 +190,32 @@ def create_runtime(services):
     services.qq_transport = transport
     services.agent.executor.sender = transport
     matcher = nonebot.on_message(priority=50, block=False)
+    group_names = {}
 
     @matcher.handle()
     async def receive_message(bot: Bot, event: MessageEvent):
         try:
             normalized = normalize(event, transport.connected())
+            if normalized.group_id and services.agent.decision.access(
+                services.config.current, normalized
+            ):
+                import time
+                from dataclasses import replace
+
+                cached = group_names.get(normalized.group_id)
+                if cached is None or cached[1] < time.time():
+                    try:
+                        info = await asyncio.wait_for(
+                            bot.get_group_info(group_id=int(normalized.group_id)), 2
+                        )
+                        name = str(info.get("group_name", ""))[:100]
+                        cached = (name, time.time() + 86400)
+                    except Exception:
+                        cached = ("", time.time() + 60)
+                    if len(group_names) >= 500:
+                        group_names.clear()
+                    group_names[normalized.group_id] = cached
+                normalized = replace(normalized, group_name=cached[0])
             if normalized.record_file is not None:
                 await services.agent.accept_record(normalized)
             else:

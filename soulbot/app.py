@@ -27,6 +27,7 @@ from soulbot.core.agent import SoulBotAgent
 from soulbot.core.budget import BudgetService
 from soulbot.core.consent import ConsentStore
 from soulbot.core.emotion import EmotionEngine
+from soulbot.core.identities import IdentityDirectory
 from soulbot.core.memory import MemoryEngine
 from soulbot.core.permissions import PermissionEngine
 from soulbot.core.relationship import RelationshipEngine
@@ -113,6 +114,7 @@ class Services:
     emotion: EmotionEngine | None = None
     relationships: RelationshipEngine | None = None
     memory: MemoryEngine | None = None
+    identities: IdentityDirectory | None = None
     consent: ConsentStore | None = None
     scheduler: ProactiveScheduler | None = None
     diary: DiaryService | None = None
@@ -150,6 +152,7 @@ def build_services(root):
     services.emotion = EmotionEngine(config, db)
     services.relationships = RelationshipEngine(config, db)
     services.memory = MemoryEngine(config, db)
+    services.identities = IdentityDirectory(services)
     services.consent = ConsentStore(config, db)
     services.diary = DiaryService(config, db)
     services.qzone = QZoneService(services)
@@ -386,6 +389,10 @@ def create_web_app(root: Path, services=None):
             "restart_required": restart_required(),
             "qq_reverse_ws_url": s.config.current.qq.receiver_url(s.config.current.web),
         }
+
+    @app.get("/api/identities", dependencies=[Depends(authorized)])
+    async def identities(query: str = ""):
+        return await asyncio.to_thread(s.identities.listing, query[:100])
 
     @app.get("/api/bootstrap")
     def bootstrap(request: Request):

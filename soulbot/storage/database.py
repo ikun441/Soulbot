@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 17:
+            if version > 18:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -410,5 +410,15 @@ class Database:
                         values_json TEXT NOT NULL DEFAULT '{}', policy TEXT NOT NULL DEFAULT 'approval',
                         approved_hash TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 0);
                     UPDATE metadata SET value='17' WHERE key='schema_version';
+                    COMMIT;
+                """)
+
+            if version < 18:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS identity_accounts(bot_id TEXT NOT NULL,user_id TEXT NOT NULL,nickname TEXT NOT NULL,updated_at REAL NOT NULL,PRIMARY KEY(bot_id,user_id));
+                    CREATE TABLE IF NOT EXISTS identity_groups(bot_id TEXT NOT NULL,group_id TEXT NOT NULL,name TEXT NOT NULL,updated_at REAL NOT NULL,PRIMARY KEY(bot_id,group_id));
+                    CREATE TABLE IF NOT EXISTS identity_members(bot_id TEXT NOT NULL,group_id TEXT NOT NULL,user_id TEXT NOT NULL,card TEXT NOT NULL,PRIMARY KEY(bot_id,group_id,user_id));
+                    UPDATE metadata SET value='18' WHERE key='schema_version';
                     COMMIT;
                 """)

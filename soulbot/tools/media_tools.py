@@ -353,7 +353,7 @@ def specifications(s, event=None):
             else config.search.enabled
             if tool.name == "search_web"
             else config.memory.enabled
-            if tool.name in {"retrieve_memory", "browse_memory", "save_memory"}
+            if tool.name in {"retrieve_memory", "browse_memory", "save_memory", "update_memory"}
             else config.image_generation.enabled and s.images.configured()
             if tool.name == "generate_image"
             else config.tts.enabled and s.speech.configured()

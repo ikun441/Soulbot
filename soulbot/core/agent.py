@@ -171,6 +171,8 @@ class SoulBotAgent:
             return
         from soulbot.core.meme_commands import handle_meme_command
 
+        if getattr(self.services, "identities", None):
+            await asyncio.to_thread(self.services.identities.observe, event)
         if await handle_meme_command(self, event):
             return
         if await self.diary_command(event):
@@ -357,6 +359,9 @@ class SoulBotAgent:
                 emotion=emotion_state,
                 relationship=relationship,
                 memories=memories,
+                identity=await asyncio.to_thread(self.services.identities.context, event)
+                if getattr(self.services, "identities", None)
+                else None,
             ),
             *history,
             {"role": "user", "content": text},
@@ -479,7 +484,7 @@ class SoulBotAgent:
         if discovery:
             discovery = json.loads(json.dumps(discovery))
             discovery["function"]["description"] += " 可选工具：" + "；".join(
-                spec["function"]["name"] + ":" + spec["function"]["description"][:30]
+                spec["function"]["name"] + ":" + spec["function"]["description"][:14]
                 for spec in catalog
             )
             discovery["function"]["parameters"]["properties"]["names"]["items"]["enum"] = names
