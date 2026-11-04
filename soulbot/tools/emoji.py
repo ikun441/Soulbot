@@ -193,13 +193,26 @@ class EmojiLibrary:
             or len(filename) > 120
         ):
             raise MediaError("文件名无效，请使用普通图片文件名")
-        if not re.fullmatch(r"[\w\-\u4e00-\u9fff ]{1,40}", category):
-            raise MediaError("分类只能使用中文、字母、数字、空格、下划线或短横线")
+        parts = category.split("/")
+        if (
+            not 1 <= len(category) <= 120
+            or "\\" in category
+            or any(not 1 <= len(part) <= 40 or part.startswith(".") for part in parts)
+            or any(ord(c) < 32 or ord(c) == 127 for c in category)
+        ):
+            raise MediaError("请选择有效分类，分类不能包含隐藏目录、路径跳转或控制字符")
         if Path(filename).suffix.lower() not in EXTENSIONS:
             raise MediaError("请选择 PNG/JPG/GIF/WebP 图片")
         extension, _, _, _ = inspect_image(content)
         with self.lock:
             directory = self.path(category)
+            if any(
+                (self.root.joinpath(*parts[:index])).is_symlink()
+                for index in range(1, len(parts) + 1)
+            ):
+                raise MediaError("上传分类不能包含符号链接")
+            if len(parts) > 1 and not directory.is_dir():
+                raise MediaError("子分类不存在，请重新选择已有分类")
             directory.mkdir(exist_ok=True)
             path = directory / (Path(filename).stem + "." + extension)
             if path.exists():

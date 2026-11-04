@@ -104,7 +104,7 @@ def install_media_api(app, s, authorized):
         return result
 
     @app.post("/api/emoji/upload", dependencies=protected)
-    async def upload_emoji(file: UploadFile, category: str = Form(default="其他", max_length=40)):
+    async def upload_emoji(file: UploadFile, category: str = Form(default="其他", max_length=120)):
         content = await file.read(MAX_IMAGE_BYTES + 1)
         item = await asyncio.to_thread(s.emoji.upload, file.filename, content, category)
         await asyncio.to_thread(s.db.audit, "emoji_uploaded")

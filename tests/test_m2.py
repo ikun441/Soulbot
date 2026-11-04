@@ -424,3 +424,40 @@ def test_image_test_send_is_fixed_to_owner_and_rate_limited(services, client):
     assert sent[0][0] == "123456789" and isinstance(sent[0][1], ImagePayload)
     assert client.post("/api/media/send-test", json=payload).status_code == 429
     assert len(sent) == 1
+
+
+def test_upload_accepts_created_unicode_categories_and_existing_nested_category(tmp_path):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from soulbot.app import build_services
+    from soulbot.services.media_service import MediaError
+
+    s = build_services(tmp_path)
+    stream = BytesIO()
+    Image.new("RGB", (20, 20), "pink").save(stream, format="PNG")
+    content = stream.getvalue()
+    name = "猫猫 🐱（贴贴）"
+    s.emoji.add_category(name)
+    uploaded = s.emoji.upload("贴贴.png", content, name)
+    assert uploaded["category"] == name
+    (s.emoji.root / "开心" / "猫猫").mkdir()
+    nested = s.emoji.upload("开心.png", content, "开心/猫猫")
+    assert nested["category"] == "开心/猫猫"
+    assert s.emoji.browse(category="开心/猫猫")["total"] == 1
+    assert any(row == {"name": name, "count": 1} for row in s.emoji.categories()["items"])
+    for value in [
+        "../private",
+        ".hidden",
+        "开心/../其他",
+        "/tmp/secret",
+        "开心//其他",
+        "开心/不存在",
+        "bad\\name",
+    ]:
+        with pytest.raises(MediaError):
+            s.emoji.upload("失败.png", content, value)
+    (s.emoji.root / "链接").symlink_to(s.emoji.root / "开心", target_is_directory=True)
+    with pytest.raises(MediaError):
+        s.emoji.upload("失败.png", content, "链接/猫猫")

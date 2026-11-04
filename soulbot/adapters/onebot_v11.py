@@ -18,7 +18,7 @@ from nonebot.adapters.onebot.v11 import (
 
 from soulbot.adapters.qzone import probe_qzone
 from soulbot.app import create_web_app
-from soulbot.core.events import ChatEvent
+from soulbot.core.events import ChatEvent, IncomingImage
 from soulbot.services.audio_service import MAX_AUDIO_BYTES, AudioPayload
 from soulbot.services.media_service import ImagePayload, MediaError
 
@@ -55,6 +55,13 @@ def normalize(event: MessageEvent, known_bot_ids=()):
         user_name=str(event.sender.nickname or "")[:100],
         group_card=str(getattr(event.sender, "card", "") or "")[:100],
         group_name=str(getattr(event, "group_name", "") or "")[:100],
+        images=tuple(
+            IncomingImage(
+                file_id=str(segment.data.get("file_id") or segment.data.get("file") or "")[:240],
+                url=str(segment.data.get("url") or "")[:8193],
+            )
+            for segment in [part for part in event.original_message if part.type == "image"][:5]
+        ),
         record_file=str(recordings[0].data.get("file", "")) if len(recordings) == 1 else None,
     )
 
@@ -88,6 +95,29 @@ class NoneBotTransport:
             raise MediaError(
                 "NapCat 未返回受支持的录音 Base64；请检查 get_record、FFmpeg 与文件是否仍有效"
             ) from None
+
+    async def fetch_image(self, event, reference):
+        from soulbot.services.incoming_images import download_image, file_id, platform_url
+
+        if platform_url(reference.url):
+            try:
+                return await download_image(reference.url)
+            except MediaError:
+                pass  # Expired Tencent URL: ask NapCat for a refreshed URL.
+        if not file_id(reference.file_id):
+            raise MediaError("图片缺少有效的 NapCat 文件 ID，不能读取路径或任意网址")
+        try:
+            async with asyncio.timeout(10):
+                result = await nonebot.get_bot(event.bot_id).call_api(
+                    "get_image", file_id=reference.file_id
+                )
+            url = result.get("url") if isinstance(result, dict) else None
+            # Ignore NapCat's local file paths. This also works when NapCat is remote.
+            return await download_image(url)
+        except MediaError:
+            raise
+        except Exception:
+            raise MediaError("NapCat 未能刷新图片链接，请重新发送图片") from None
 
     @staticmethod
     def connected():

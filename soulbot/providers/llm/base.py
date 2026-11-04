@@ -30,11 +30,46 @@ class Completion:
 DeltaHandler = Callable[[str], Awaitable[None]]
 
 
+def text_content(message):
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
+
+
+def has_images(messages):
+    return any(
+        isinstance(m.get("content"), list)
+        and any(isinstance(p, dict) and p.get("type") == "image_url" for p in m["content"])
+        for m in messages
+    )
+
+
 def estimate_tokens(messages: list[dict]) -> int:
-    # A conservative UTF-8 byte bound, not a tokenizer or provider usage measurement.
+    # Text uses a conservative byte bound. Image reservation is an estimate, not a tokenizer.
+    # Native vision tokens depend on the provider; measured usage replaces this reservation.
     import json
 
-    return 16 + sum(12 + len(json.dumps(m, ensure_ascii=False).encode("utf-8")) for m in messages)
+    total = 16
+    for message in messages:
+        compact = dict(message)
+        if isinstance(compact.get("content"), list):
+            parts = []
+            for part in compact["content"]:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    parts.append({"type": "image_url", "image_url": "[transient image]"})
+                    total += 2048
+                else:
+                    parts.append(part)
+            compact["content"] = parts
+        total += 12 + len(json.dumps(compact, ensure_ascii=False).encode("utf-8"))
+    return total
 
 
 def trim_context(messages: list[dict], maximum: int) -> list[dict]:

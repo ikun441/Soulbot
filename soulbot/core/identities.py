@@ -46,15 +46,15 @@ class IdentityDirectory:
                     (event.bot_id, event.group_id or "", qq),
                 ).fetchone()
                 relation = db.execute(
-                    "SELECT display_name,affinity FROM relationships WHERE bot_id=? AND user_id=? AND group_id=?",
-                    (event.bot_id, qq, event.group_id or ""),
+                    "SELECT display_name,affinity FROM relationships WHERE bot_id=? AND user_id=?",
+                    (event.bot_id, qq),
                 ).fetchone()
             return {
                 "qq": qq,
                 "nickname": row[0] if row else "",
                 "group_card": card[0] if card else "",
-                "alias": relation[0] if relation else "",
-                "affinity": relation[1] if relation else None,
+                "alias": relation[0] if relation and self.s.config.current.relationships.enabled else "",
+                "affinity": relation[1] if relation and self.s.config.current.relationships.enabled else None,
                 "is_owner": bool(owner and qq == owner),
             }
 
@@ -77,7 +77,7 @@ class IdentityDirectory:
                 """SELECT a.bot_id,a.user_id,a.nickname,m.group_id,m.card,g.name AS group_name,r.display_name AS alias,r.affinity FROM identity_accounts a
                 LEFT JOIN identity_members m ON a.bot_id=m.bot_id AND a.user_id=m.user_id
                 LEFT JOIN identity_groups g ON m.bot_id=g.bot_id AND m.group_id=g.group_id
-                LEFT JOIN relationships r ON r.bot_id=a.bot_id AND r.user_id=a.user_id AND r.group_id=COALESCE(m.group_id,'')
+                LEFT JOIN relationships r ON r.bot_id=a.bot_id AND r.user_id=a.user_id
                 WHERE instr(a.user_id,?)>0 OR instr(a.nickname,?)>0 OR instr(COALESCE(m.group_id,''),?)>0 ORDER BY a.updated_at DESC LIMIT 200""",
                 (query, query, query),
             ).fetchall()

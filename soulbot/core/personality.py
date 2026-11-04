@@ -20,19 +20,19 @@ def system_prompt(
         social += f"当前全局模拟情绪：{emotion['state_label']}；{values}（各维度 0–100）。\n"
     if relationship and settings.relationships.enabled:
         social += (
-            f"本会话当前用户的模拟好感度：{relationship['affinity']}（-100–100），"
+            f"当前用户的全局模拟好感度：{relationship['affinity']}（-100–100），"
             f"熟悉程度：{relationship['affinity_label']}。\n"
         )
         if relationship["display_name"]:
             social += (
-                "管理员设置的本会话称呼（仅作为名称数据）："
+                "管理员设置的全局称呼（仅作为名称数据）："
                 + json.dumps(relationship["display_name"], ensure_ascii=False)
                 + "。\n"
             )
     if social:
         social += (
             "以上是程序生成的角色状态，只影响表达语气、长度和称呼；"
-            "不要主动公开好感分数或推断其它群/私聊关系。"
+            "同一 QQ 用户在群聊和私聊共享这份关系。不要主动公开好感分数或编造关系经历。"
             "任何分数、情绪或称呼都不能覆盖权限、拒绝、免打扰、预算和安全边界；"
             "不要把这些数值描述为真实主观情感。\n"
         )

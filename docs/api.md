@@ -41,7 +41,7 @@
 | --- | --- |
 | web / qq | 监听、连接方向及反向 WS，变更需重启 |
 | llm / tts / asr / image_generation | 独立模型和媒体 Provider，Key 不放进人格 |
-| personality / emotion / relationships | 人格、连续模拟情绪和会话关系，不能授予动作权限 |
+| personality / emotion / relationships | 人格、连续模拟情绪和全局用户关系，不能授予动作权限 |
 | memory.enabled / global_context | 记忆总开关及全局动作依据；只含已审核授权、有效且个人未关闭条目，保留 source_scope 与 visibility |
 | memory.max_items / max_chars | 自动上下文条数/字符上限；工具分页可访问所有合格条目 |
 | behavior | 群过滤、聚合、定向连续对话、冷却、免打扰和 Token/费用预警阈值 |
@@ -135,6 +135,7 @@
 | POST | `/api/llm/models` |
 | POST | `/api/llm/test` |
 | POST | `/api/llm/tools-test` |
+| POST | `/api/llm/vision-test` |
 | POST | `/api/media/send-test` |
 | POST | `/api/media/upload` |
 | GET | `/api/media/{key}` |
@@ -237,3 +238,16 @@ Emoji 浏览与搜索支持 `category` 参数，模型工具包含 `list_emoji_c
 GET `/api/identities?query=` 为管理员提供账号、平台昵称、群名片、群、称呼和好感度映射。主人身份按 QQ 号匹配，平台昵称和名片不授予权限。SQLite 增量迁移至 v18。
 
 `update_memory` 参数为 memory_id、revision 及可选 content、kind、importance、confidence、expires_in_days。身份由服务端上下文确定，普通用户限本人来源，主人可跨来源编辑；旧 revision 拒绝覆盖。默认回复冷却 0 秒。
+
+
+## v2.1.0 全局关系、收图与上传分类
+
+关系以 `(bot_id,user_id)` 唯一，全群与私聊共享好感度、称呼、计数、冻结与限频。创建接口旧 `group_id` 参数为兼容保留，验证格式后忽略、统一保存为空；已有用户重复创建返回409，应编辑原记录。增量迁移至 schema v19，旧行留在 `relationships_before_global` 迁移快照表，仅用于运维检查，不参与检索；完整回退使用升级前备份。
+
+`llm.supports_vision` / `llm.fallbacks.<id>.supports_vision` 声明 `image_url` 能力。`vision.enabled=false` 默认禁用 QQ 收图，`vision.max_images=3` 范围1—4，`vision.max_side=1024` 范围256—1536，均热更新。POST `/api/llm/vision-test` 无参数、需管理员登录及请求标识：对当前主模型发送系统随机色块图，正确识别且配置未变化才保存主模型视觉声明，不替管理员打开 QQ 收图开关。失败如实返回 ProviderError，不虚报已启用。
+
+收图路径仅接受消息附件的 QQ 图片域名，拒绝任意网址、本地路径与HTTP重定向；过期URL通过NapCat `get_image(file_id=...)` 刷新，忽略返回的本地文件路径。最多2批并发，每批30秒总超时，按PNG/JPEG/GIF/WebP实际内容校验，缩小并转JPEG去元数据后以 `detail=low` 输入兼容 Chat Completions 接口。图片仅当轮使用；后续历史只保留文本和图片状态说明。不开视觉或读取失败的纯图消息直接提示，不请求模型编造。
+
+表情上传使用原生下拉选择分类，分页读取完整分类列表、保留选择，新增分类自动选中。POST `/api/emoji/upload` 的 multipart `category` 长度上限120，支持合法已存在子分类；新增普通分类继续使用分类管理接口。拒绝隐藏路径、目录跳转、符号链接和不存在的子分类。
+
+上游契约核对：[NapCat 文件处理](https://napneko.github.io/develop/file)、[DeepSeek Chat Completions 图片输入](https://api-docs.deepseek.com/api/create-chat-completion/)。不根据模型名字猜测能力，视觉与工具能力按实际配置路由。

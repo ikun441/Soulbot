@@ -2,6 +2,12 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class IncomingImage:
+    file_id: str = ""
+    url: str = ""
+
+
+@dataclass(frozen=True)
 class ChatEvent:
     bot_id: str
     user_id: str
@@ -18,6 +24,7 @@ class ChatEvent:
     user_name: str = ""
     group_card: str = ""
     group_name: str = ""
+    images: tuple[IncomingImage, ...] = ()
 
     @property
     def scope(self):

@@ -1,7 +1,13 @@
 import asyncio
 import random
 
-from soulbot.providers.llm.base import ProviderError, estimate_tokens, trim_context
+from soulbot.providers.llm.base import (
+    ProviderError,
+    estimate_tokens,
+    has_images,
+    text_content,
+    trim_context,
+)
 from soulbot.providers.llm.openai_compatible import OpenAICompatibleProvider
 from soulbot.services.provider_diagnostics import ProviderDiagnostics
 
@@ -198,11 +204,7 @@ class LLMService:
         action_references = None
         if self.memory_access:
             query = next(
-                (
-                    str(m.get("content") or "")
-                    for m in reversed(messages)
-                    if m.get("role") == "user"
-                ),
+                (text_content(m) for m in reversed(messages) if m.get("role") == "user"),
                 "",
             )
             # Always retrieve before an operation. Fact extraction can keep a strict source-only prompt.
@@ -211,11 +213,7 @@ class LLMService:
             )
         if available and action_references is None:
             query = next(
-                (
-                    str(m.get("content") or "")
-                    for m in reversed(messages)
-                    if m.get("role") == "user"
-                ),
+                (text_content(m) for m in reversed(messages) if m.get("role") == "user"),
                 "",
             )
             references = await asyncio.to_thread(memory.action_context, query[:1000])
@@ -230,7 +228,10 @@ class LLMService:
             and self.config.current.tools.retrieve_memory == "auto"
         ):
             try:
-                self.chain(self.config.current, ["tool_calling"])
+                self.chain(
+                    self.config.current,
+                    ["tool_calling"] + (["vision"] if has_images(messages) else []),
+                )
                 recall_tools = [
                     {
                         "type": "function",
@@ -264,7 +265,9 @@ class LLMService:
                 )
                 - 128
                 for endpoint in endpoints
-                if endpoint.enabled and (not effective_tools or endpoint.supports_tools)
+                if endpoint.enabled
+                and (not effective_tools or endpoint.supports_tools)
+                and (not has_images(messages) or endpoint.supports_vision)
             ]
             maximum = min(windows or [settings.llm.context_window]) - (
                 estimate_tokens([{"tools": effective_tools}]) if effective_tools else 0
@@ -351,7 +354,11 @@ class LLMService:
         task_state=None,
     ):
         settings = self.config.current.model_copy(deep=True)
-        required = ["tool_calling"] if tools else []
+        if has_images(messages) and not settings.vision.enabled:
+            raise ProviderError("permission", "QQ 图片理解已关闭，已停止上传图片")
+        required = (["tool_calling"] if tools else []) + (
+            ["vision"] if has_images(messages) else []
+        )
         chain = self.chain(settings, required)
         total, last_error, emitted = (task_state or {}).get("tokens", 0), None, False
 

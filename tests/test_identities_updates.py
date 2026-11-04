@@ -31,9 +31,10 @@ def test_owner_is_qq_identity_not_nickname_and_group_card_is_scoped(tmp_path):
     b = s.identities.context(other)
     assert a["speaker"]["is_owner"] is False and a["owner_qq"] == "23456"
     assert a["speaker"]["group_card"] == "群友甲" and b["speaker"]["group_card"] == "群友乙"
-    assert a["speaker"]["affinity"] == 35 and b["speaker"]["affinity"] is None
+    assert a["speaker"]["affinity"] == b["speaker"]["affinity"] == 35
     assert s.identities.context(replace(e, user_id="23456"))["speaker"]["is_owner"]
     assert len(s.identities.listing()["items"]) == 2
+    assert {row["affinity"] for row in s.identities.listing()["items"]} == {35}
     prompt = system_prompt(s.config.current, identity=a)["content"]
     assert "系统核验的账号映射" in prompt and "45678" in prompt
     assert build_services(tmp_path).identities.context(e)["speaker"]["nickname"] == "主人"
@@ -89,3 +90,12 @@ def test_model_add_update_revision_owner_and_review_policy(tmp_path):
         )
 
     asyncio.run(run())
+
+
+def test_disabled_relationships_do_not_enter_identity_prompt(tmp_path):
+    s = build_services(tmp_path)
+    e = ChatEvent("34567", "45678", "disabled", "hello")
+    s.relationships.create(e.bot_id, e.user_id, "", "隐藏称呼", 80, True)
+    s.config.current.relationships.enabled = False
+    context = s.identities.context(e)
+    assert context["speaker"]["affinity"] is None and context["speaker"]["alias"] == ""

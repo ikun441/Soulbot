@@ -10,7 +10,13 @@ from soulbot.core.conversation import ConversationStore
 from soulbot.core.decision import DecisionEngine
 from soulbot.core.permissions import PermissionEngine
 from soulbot.core.personality import system_prompt
-from soulbot.providers.llm.base import Completion, ProviderError, estimate_tokens, trim_context
+from soulbot.providers.llm.base import (
+    Completion,
+    ProviderError,
+    estimate_tokens,
+    has_images,
+    trim_context,
+)
 
 
 def reply_parts(text, settings):
@@ -162,6 +168,7 @@ class SoulBotAgent:
         self.executor = ActionExecutor(config, self.decision, db.audit)
         self.pending = {}
         self.record_jobs = set()
+        self.image_limiter = asyncio.Semaphore(2)
         self.closed = False
 
     async def accept(self, event):
@@ -337,7 +344,20 @@ class SoulBotAgent:
         if not self.llm.configured():
             await asyncio.to_thread(self.db.audit, "llm_not_configured")
             return
-        text = "\n".join(item.text for item, _ in eligible)
+        text = "\n".join(item.text or "[收到图片]" for item, _ in eligible)
+        from soulbot.services.incoming_images import prepare_images
+
+        async with self.image_limiter:
+            try:
+                async with asyncio.timeout(30):
+                    image_parts, image_notice = await prepare_images(self, eligible)
+            except TimeoutError:
+                image_parts, image_notice = [], "图片读取超时，本轮未读取图片，请稍后重新发送。"
+                await asyncio.to_thread(self.db.audit, "qq_image_read_failed", "timeout")
+        if image_notice:
+            text += "\n[系统图片状态] " + image_notice
+        if not image_parts and image_notice and not any(item.text.strip() for item, _ in eligible):
+            return await self.executor.send(event, image_notice, trigger)
         history = await asyncio.to_thread(
             self.conversation.history, event.scope, settings.behavior.context_turns
         )
@@ -364,7 +384,10 @@ class SoulBotAgent:
                 else None,
             ),
             *history,
-            {"role": "user", "content": text},
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": text}, *image_parts] if image_parts else text,
+            },
         ]
         try:
             result, attachments = await self.answer(
@@ -455,7 +478,10 @@ class SoulBotAgent:
             specs = specifications(self.services, event)
             if specs:
                 try:
-                    self.llm.chain(self.config.current, ["tool_calling"])
+                    self.llm.chain(
+                        self.config.current,
+                        ["tool_calling"] + (["vision"] if has_images(messages) else []),
+                    )
                 except ProviderError:
                     await asyncio.to_thread(
                         self.db.audit, "agent_tools_unavailable", "model_capability_disabled"
@@ -497,7 +523,9 @@ class SoulBotAgent:
                 - min(cfg.limits.max_output_per_request, e.context_window // 2)
                 - 128
                 for e in endpoints
-                if e.enabled and e.supports_tools
+                if e.enabled
+                and e.supports_tools
+                and (not has_images(messages) or e.supports_vision)
             ]
             maximum = min(windows or [cfg.llm.context_window]) - estimate_tokens(
                 [{"tools": candidate}]

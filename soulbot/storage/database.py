@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 18:
+            if version > 19:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -422,3 +422,8 @@ class Database:
                     UPDATE metadata SET value='18' WHERE key='schema_version';
                     COMMIT;
                 """)
+
+            if version < 19:
+                from soulbot.storage.relationship_migration import merge_global_relationships
+
+                merge_global_relationships(db)

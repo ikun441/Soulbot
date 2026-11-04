@@ -214,7 +214,7 @@ class BackupService:
                             "SELECT value FROM metadata WHERE key='schema_version'"
                         ).fetchone()[0]
                     )
-                    if not 1 <= version <= 18:
+                    if not 1 <= version <= 19:
                         raise ValueError
             return files
         except (

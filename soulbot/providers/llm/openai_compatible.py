@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
-from soulbot.providers.llm.base import Completion, ProviderError, Usage
+from soulbot.providers.llm.base import Completion, ProviderError, Usage, has_images
 
 MAX_BODY = 2 * 1024 * 1024
 
@@ -77,6 +77,7 @@ class OpenAICompatibleProvider:
             {"llm"}
             | ({"streaming"} if settings.streaming else set())
             | ({"tool_calling"} if settings.supports_tools else set())
+            | ({"vision"} if settings.supports_vision else set())
         )
 
     def client(self):
@@ -157,6 +158,8 @@ class OpenAICompatibleProvider:
         streaming = self.settings.streaming
         if tools and not self.settings.supports_tools:
             raise ProviderError("unsupported_capability", "此 Provider 未声明工具调用能力")
+        if has_images(messages) and not self.settings.supports_vision:
+            raise ProviderError("unsupported_capability", "此 Provider 未声明图片理解能力")
         payload = {
             "model": self.settings.model,
             "messages": messages,

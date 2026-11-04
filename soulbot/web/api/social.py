@@ -1,4 +1,4 @@
-"""Administrator editing APIs for simulated emotion and scoped relationships."""
+"""Administrator editing APIs for simulated emotion and global account relationships."""
 
 from fastapi import Depends, HTTPException, Query
 from pydantic import Field
@@ -24,7 +24,7 @@ class RelationshipFields(Model):
 class RelationshipCreate(RelationshipFields):
     bot_id: str = Field(pattern=r"^[1-9][0-9]{4,11}$")
     user_id: str = Field(pattern=r"^[1-9][0-9]{4,11}$")
-    group_id: str = Field(default="", pattern=r"^([1-9][0-9]{4,11})?$")
+    group_id: str = Field(default="", pattern=r"^([1-9][0-9]{4,11})?$", description="兼容旧客户端；关系始终全局保存，此字段不再分组")
 
 
 class RelationshipEdit(RelationshipFields, Revision):

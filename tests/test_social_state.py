@@ -44,7 +44,7 @@ def test_v7_migration_preserves_existing_state_and_is_idempotent(services):
         db.execute("DROP TABLE social_observations")
         db.execute("UPDATE metadata SET value='7' WHERE key='schema_version'")
     reopened = Database(services.db.path)
-    assert reopened.get("schema_version") == "18" and reopened.get("preserved") == "fixture"
+    assert reopened.get("schema_version") == "19" and reopened.get("preserved") == "fixture"
     Database(reopened.path)
     assert EmotionEngine(services.config, reopened).snapshot()["state"] == "calm"
 
@@ -109,28 +109,28 @@ def test_emotion_success_events_are_deduplicated_and_globally_cooled(services):
     assert "private text" not in json.dumps(engine.history())
 
 
-def test_relationship_identity_isolates_bots_groups_and_private_context(services):
+def test_relationship_is_global_across_groups_and_private_but_not_bots_or_users(services):
     engine = services.relationships
     private = event()
     engine.interact(private)
-    assert engine.get(private)["affinity"] == 1
-    for other in [
-        replace(private, group_id="12345"),
-        replace(private, bot_id="98765"),
-        replace(private, user_id="87654"),
-    ]:
+    group = replace(private, group_id="12345")
+    assert engine.get(private) == engine.get(group)
+    engine.interact(group)
+    assert engine.get(private)["interactions"] == 2
+    assert engine.get(private)["affinity"] == 1  # same user's cooldown spans channels
+    for other in [replace(private, bot_id="98765"), replace(private, user_id="87654")]:
         assert engine.get(other) is None
         engine.interact(other)
-    assert engine.listing()["total"] == 4
+    assert engine.listing()["total"] == 3
     row = engine.get(private)
-    engine.edit(
-        row["id"], row["revision"], display_name="private-only-name", affinity=88, automatic=True
+    engine.edit(row["id"], row["revision"], display_name="全局称呼", affinity=88, automatic=True)
+    assert engine.get(group)["display_name"] == "全局称呼"
+    assert (
+        "全局称呼"
+        in system_prompt(services.config.current, relationship=engine.get(group))["content"]
     )
-    assert engine.get(replace(private, group_id="12345"))["display_name"] == ""
-    group_prompt = system_prompt(
-        services.config.current, relationship=engine.get(replace(private, group_id="12345"))
-    )
-    assert "private-only-name" not in group_prompt["content"]
+    with pytest.raises(StateConflict):
+        engine.create(private.bot_id, private.user_id, "56789", "重复", 10, True)
 
 
 def test_affinity_daily_limit_cooldown_edits_restart_and_timezone_boundary(services):
@@ -241,7 +241,7 @@ def test_config_rejects_invalid_thresholds_and_nonfinite_dimensions():
 @pytest.mark.parametrize(
     "reply,sends,expected", [("好的", True, 1), ("[[SILENT]]", True, 0), ("好的", False, 0)]
 )
-def test_agent_uses_current_scope_and_only_rewards_successful_reply(
+def test_agent_uses_global_relationship_and_only_rewards_successful_reply(
     services, monkeypatch, reply, sends, expected
 ):
     captured = []
@@ -249,8 +249,7 @@ def test_agent_uses_current_scope_and_only_rewards_successful_reply(
     settings.qq.enabled = True
     settings.behavior.reply_cooldown_seconds = 0
     settings.behavior.global_send_interval_seconds = 0
-    services.relationships.create("34567", "23456", "12345", "群内称呼", 70, True)
-    services.relationships.create("34567", "23456", "", "秘密私聊称呼", 90, True)
+    services.relationships.create("34567", "23456", "", "全局称呼", 70, True)
     monkeypatch.setattr(services.llm, "configured", lambda: True)
 
     async def completion(messages, **kwargs):
@@ -268,8 +267,7 @@ def test_agent_uses_current_scope_and_only_rewards_successful_reply(
     monkeypatch.setattr(services.llm, "chain", no_tools)
     services.agent.executor.sender = sender
     asyncio.run(services.agent.process([(event(group="12345"), "direct")]))
-    assert "群内称呼" in captured[0][0]["content"]
-    assert "秘密私聊称呼" not in str(captured)
+    assert "全局称呼" in captured[0][0]["content"]
     assert "全局模拟情绪" in captured[0][0]["content"]
     assert services.relationships.get(event(group="12345"))["affinity"] == 70 + expected
     assert len(services.emotion.history()) == expected
@@ -297,3 +295,75 @@ def test_web_chat_uses_global_emotion_but_never_loads_qq_relationships(services,
     assert "全局模拟情绪" in captured[0][0]["content"]
     assert "不应公开称呼" not in str(captured)
     assert services.relationships.listing()["items"][0]["interactions"] == 0
+
+
+def test_global_migration_preserves_rows_quotas_freeze_alias_and_restart(services):
+    import sqlite3
+
+    with services.db.connect() as db:
+        db.execute("DROP INDEX relationships_global_user")
+        db.execute("DROP TABLE relationships_before_global")
+        db.execute("UPDATE metadata SET value='18' WHERE key='schema_version'")
+        columns = "bot_id,user_id,group_id,display_name,affinity,automatic,interactions,last_reward_at,reward_day,daily_gain,daily_loss,updated_at,revision,last_feedback_at"
+        for values in [
+            ("34567", "23456", "", "旧称呼", 82, 0, 2, 100.0, "2026-11-04", 2, 1, 100.0, 4, 110.0),
+            (
+                "34567",
+                "23456",
+                "12345",
+                "新称呼",
+                10,
+                1,
+                3,
+                200.0,
+                "2026-11-04",
+                3,
+                2,
+                200.0,
+                3,
+                210.0,
+            ),
+            ("34567", "23456", "56789", "", 20, 1, 4, 150.0, "2026-11-03", 8, 9, 150.0, 2, None),
+            ("98765", "23456", "12345", "另一机器人", -10, 1, 1, None, "", 0, 0, 100.0, 0, None),
+        ]:
+            db.execute(
+                f"INSERT INTO relationships ({columns}) VALUES ({','.join('?' * 14)})", values
+            )
+    migrated = Database(services.db.path)
+    engine = RelationshipEngine(services.config, migrated, services.relationships.clock)
+    row = engine.get(event())
+    assert row["affinity"] == 82 and row["automatic"] is False
+    assert row["display_name"] == "新称呼" and row["interactions"] == 9
+    assert row["daily_gain"] == 5 and row["daily_loss"] == 3
+    assert row["last_reward_at"] == 200 and row["last_feedback_at"] == 210
+    assert row["revision"] == 5 and row["group_id"] == ""
+    assert engine.get(event(group="12345")) == row
+    assert engine.get(event(bot="98765"))["affinity"] == -10
+    with migrated.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM relationships_before_global").fetchone()[0] == 4
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO relationships(bot_id,user_id,group_id,updated_at) VALUES ('34567','23456','99999',300)"
+            )
+    Database(services.db.path)
+    assert engine.get(event()) == row
+
+
+def test_feedback_cooldown_daily_loss_and_manual_freeze_are_global(services):
+    engine = services.relationships
+    engine.interact(event())
+    assert engine.apply_feedback(event("positive", group="12345"), "positive")
+    after = engine.get(event())
+    assert not engine.apply_feedback(event("negative", group="56789"), "negative")
+    services.test_clock[0] += 301
+    assert engine.apply_feedback(event("negative", group="56789"), "negative")
+    assert engine.get(event())["daily_loss"] > 0
+    assert engine.get(event(group="12345"))["affinity"] < after["affinity"]
+    row = engine.get(event())
+    frozen = engine.edit(
+        row["id"], row["revision"], display_name="全局", affinity=55, automatic=False
+    )
+    services.test_clock[0] += 301
+    engine.interact(event("new", group="99999"))
+    assert not engine.apply_feedback(event("negative2"), "negative")
+    assert engine.get(event()) == frozen

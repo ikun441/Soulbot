@@ -61,7 +61,7 @@ class DecisionEngine:
         return not roll or probability >= 1 or probability > 0 and self.rng() < probability
 
     def classify(self, settings, event, roll=True):
-        if not self.access(settings, event) or not event.text.strip() or len(event.text) > 12000:
+        if not self.access(settings, event) or (not event.text.strip() and not event.images) or len(event.text) > 12000:
             return None
         if not event.group_id:
             return "direct" if self.passive_candidate(settings, event, roll) else None

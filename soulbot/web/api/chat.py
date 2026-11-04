@@ -43,6 +43,12 @@ def install_chat_api(app, s, authorized):
     async def test_tools():
         return await s.llm.verify_tools()
 
+    @app.post("/api/llm/vision-test", dependencies=[Depends(authorized)])
+    async def test_vision():
+        from soulbot.services.vision_probe import verify_vision
+
+        return await verify_vision(s.llm)
+
     @app.post("/api/llm/test", dependencies=[Depends(authorized)])
     async def test():
         settings, credentials = s.llm.test_inputs()

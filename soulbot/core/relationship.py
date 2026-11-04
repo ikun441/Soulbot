@@ -1,4 +1,4 @@
-"""Per-bot, per-conversation social affinity; scores never grant permissions."""
+"""Per-bot, global account social affinity; scores never grant permissions."""
 
 import time
 from datetime import datetime
@@ -35,14 +35,14 @@ class RelationshipEngine:
             return None
         with self.db.connect() as db:
             row = db.execute(
-                "SELECT * FROM relationships WHERE bot_id=? AND group_id=? AND user_id=?",
-                (event.bot_id, event.group_id or "", event.user_id),
+                "SELECT * FROM relationships WHERE bot_id=? AND user_id=?",
+                (event.bot_id, event.user_id),
             ).fetchone()
         return self._public(row) if row else None
 
     def listing(self, query="", offset=0, limit=30):
         # substr matching keeps %, _ and other query text literal.
-        where = "WHERE instr(user_id,?)>0 OR instr(display_name,?)>0 OR instr(group_id,?)>0"
+        where = "WHERE instr(user_id,?)>0 OR instr(display_name,?)>0 OR instr(bot_id,?)>0"
         args = (query, query, query)
         with self.db.connect() as db:
             total = db.execute("SELECT COUNT(*) FROM relationships " + where, args).fetchone()[0]
@@ -62,14 +62,14 @@ class RelationshipEngine:
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if db.execute(
-                "SELECT 1 FROM relationships WHERE bot_id=? AND group_id=? AND user_id=?",
-                (bot_id, group_id, user_id),
+                "SELECT 1 FROM relationships WHERE bot_id=? AND user_id=?",
+                (bot_id, user_id),
             ).fetchone():
-                raise StateConflict("当前会话的用户关系已存在，请编辑原记录")
+                raise StateConflict("该用户的全局关系已存在，请编辑原记录")
             cursor = db.execute(
                 "INSERT INTO relationships (bot_id,user_id,group_id,display_name,affinity,"
                 "automatic,updated_at) VALUES (?,?,?,?,?,?,?)",
-                (bot_id, user_id, group_id, display_name, affinity, automatic, now),
+                (bot_id, user_id, "", display_name, affinity, automatic, now),
             )
             row = db.execute(
                 "SELECT * FROM relationships WHERE id=?", (cursor.lastrowid,)
@@ -119,11 +119,11 @@ class RelationshipEngine:
             db.execute(
                 "INSERT OR IGNORE INTO relationships (bot_id,user_id,group_id,updated_at) "
                 "VALUES (?,?,?,?)",
-                (event.bot_id, event.user_id, event.group_id or "", now),
+                (event.bot_id, event.user_id, "", now),
             )
             row = db.execute(
-                "SELECT * FROM relationships WHERE bot_id=? AND group_id=? AND user_id=?",
-                (event.bot_id, event.group_id or "", event.user_id),
+                "SELECT * FROM relationships WHERE bot_id=? AND user_id=?",
+                (event.bot_id, event.user_id),
             ).fetchone()
             if not row["automatic"]:
                 return
@@ -172,8 +172,8 @@ class RelationshipEngine:
             if not feedback_job_valid(db, event, job_id, now):
                 return False
             row = db.execute(
-                "SELECT * FROM relationships WHERE bot_id=? AND user_id=? AND group_id=?",
-                (event.bot_id, event.user_id, event.group_id or ""),
+                "SELECT * FROM relationships WHERE bot_id=? AND user_id=?",
+                (event.bot_id, event.user_id),
             ).fetchone()
             if not row or not row["automatic"]:
                 return False

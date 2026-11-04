@@ -3,7 +3,7 @@
 import hashlib
 import json
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from uuid import uuid4
 
 from soulbot.core.events import ChatEvent
@@ -33,7 +33,7 @@ class ToolApprovals:
         raw_context = {
             "scope": context.scope,
             "purpose": context.purpose,
-            "event": asdict(context.event) if context.event else None,
+            "event": asdict(replace(context.event, images=())) if context.event else None,
         }
         digest = hashlib.sha256(
             json.dumps([name, data, raw_context, owner], sort_keys=True).encode()

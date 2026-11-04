@@ -110,6 +110,7 @@ class LLMEndpoint(Model):
     context_window: int = Field(default=16384, ge=1024, le=2000000)
     streaming: bool = False
     supports_tools: bool = False
+    supports_vision: bool = False
     stream_usage: bool = False
     max_output_field: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
     input_price_cny_per_million: float | None = Field(
@@ -147,6 +148,12 @@ class LLMEndpoint(Model):
         except ValueError:
             raise ValueError("端口号无效") from None
         return value.rstrip("/")
+
+
+class VisionSettings(Model):
+    enabled: bool = False
+    max_images: int = Field(default=3, ge=1, le=4)
+    max_side: int = Field(default=1024, ge=256, le=1536)
 
 
 class LLM(LLMEndpoint):
@@ -666,6 +673,7 @@ class Settings(Model):
     web: Web = Field(default_factory=Web)
     qq: QQ = Field(default_factory=QQ)
     llm: LLM = Field(default_factory=LLM)
+    vision: VisionSettings = Field(default_factory=VisionSettings)
     personality: Personality = Field(default_factory=Personality)
     behavior: Behavior = Field(default_factory=Behavior)
     appearance: Appearance = Field(default_factory=Appearance)
