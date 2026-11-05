@@ -85,6 +85,12 @@ class BackupService:
                 and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
             )
             or (
+                len(path.parts) == 4
+                and path.parts[:2] == ("data", "proactive_media")
+                and re.fullmatch(r"[a-f0-9]{32}", path.parts[2])
+                and re.fullmatch(r"[01]\.(png|jpg|gif|webp|mp3|wav)", path.name)
+            )
+            or (
                 len(path.parts) == 3
                 and path.parts[:2] == ("data", "wallpapers")
                 and re.fullmatch(r"[a-f0-9]{32}\.(png|jpg|gif|webp|mp4|webm)", path.name)
@@ -97,7 +103,11 @@ class BackupService:
             self.root / name
             for name in ("config.yaml", ".env", "data/secrets.json", "data/plugin-secrets.json")
         ]
-        for directory in (self.root / "emoji", self.root / "data/wallpapers"):
+        for directory in (
+            self.root / "emoji",
+            self.root / "data/wallpapers",
+            self.root / "data/proactive_media",
+        ):
             if directory.exists():
                 candidates.extend(directory.rglob("*"))
         for path in candidates:
@@ -124,6 +134,46 @@ class BackupService:
             if destination.stat().st_size + sum(map(len, files.values())) > MAX_BACKUP:
                 raise ValueError("备份超过 256MB")
             files["data/soulbot.db"] = destination.read_bytes()
+            # Assets are immutable, but a job can be created while the snapshot is built.
+            # Include every asset referenced by the actual database snapshot, even if its
+            # directory appeared after the initial file enumeration.
+            with sqlite3.connect(destination) as snapshot_db:
+                columns = {r[1] for r in snapshot_db.execute("PRAGMA table_info(proactive_jobs)")}
+                if "attachments_json" in columns:
+                    for key, status, raw in snapshot_db.execute(
+                        "SELECT id,status,attachments_json FROM proactive_jobs"
+                    ):
+                        for item in json.loads(raw):
+                            name = f"data/proactive_media/{key}/{item['filename']}"
+                            if not self.allowed(name):
+                                raise ValueError("主动任务附件路径无效")
+                            path = self.root / name
+                            if not path.is_file():
+                                if status in {
+                                    "pending_approval",
+                                    "scheduled",
+                                    "waiting",
+                                    "running",
+                                }:
+                                    raise ValueError("待发送任务附件缺失，请先处理任务再备份")
+                                continue
+                            if (
+                                path.is_symlink()
+                                or path.parent.is_symlink()
+                                or path.parent.parent.is_symlink()
+                            ):
+                                raise ValueError("附件目录包含符号链接")
+                            content = path.read_bytes()
+                            if hashlib.sha256(content).hexdigest() != item["sha256"]:
+                                raise ValueError("主动任务附件已变化，请先处理任务再备份")
+                            if (
+                                sum(map(len, files.values()))
+                                - len(files.get(name, b""))
+                                + len(content)
+                                > MAX_BACKUP
+                            ):
+                                raise ValueError("备份超过256MB，请先清理已结束任务的附件")
+                            files[name] = content
         manifest = {
             "format": 1,
             "version": VERSION,
@@ -214,8 +264,21 @@ class BackupService:
                             "SELECT value FROM metadata WHERE key='schema_version'"
                         ).fetchone()[0]
                     )
-                    if not 1 <= version <= 19:
+                    if not 1 <= version <= 20:
                         raise ValueError
+                    columns = {r[1] for r in db.execute("PRAGMA table_info(proactive_jobs)")}
+                    if "attachments_json" in columns:
+                        for key, raw in db.execute(
+                            "SELECT id,attachments_json FROM proactive_jobs WHERE status IN ('pending_approval','scheduled','waiting','running')"
+                        ):
+                            for item in json.loads(raw):
+                                name = f"data/proactive_media/{key}/{item['filename']}"
+                                if (
+                                    not self.allowed(name)
+                                    or name not in files
+                                    or hashlib.sha256(files[name]).hexdigest() != item["sha256"]
+                                ):
+                                    raise ValueError
             return files
         except (
             ValueError,

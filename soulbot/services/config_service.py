@@ -581,6 +581,7 @@ class DiarySettings(Model):
 class ProactiveSettings(Model):
     enabled: bool = False
     auto_drafts: bool = False
+    auto_media: Literal["none", "emoji", "voice"] = "none"
     max_auto_drafts_per_day: int = Field(default=3, ge=1, le=20)
     draft_topic: str = Field(
         default="轻松问候，关心对方是否愿意聊天，不要求立即回复", min_length=1, max_length=300

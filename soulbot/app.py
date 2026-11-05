@@ -13,7 +13,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -44,6 +44,7 @@ from soulbot.services.diary_periods import DiaryPeriods
 from soulbot.services.diary_service import DiaryService
 from soulbot.services.environment_service import EnvironmentError, EnvironmentService
 from soulbot.services.experience_sampler import ExperienceSampler
+from soulbot.services.identity_sync import IdentitySync, SyncRequest
 from soulbot.services.image_service import ImageGenerationService
 from soulbot.services.llm_service import LLMService
 from soulbot.services.media_service import MediaError, MediaStore
@@ -115,6 +116,7 @@ class Services:
     relationships: RelationshipEngine | None = None
     memory: MemoryEngine | None = None
     identities: IdentityDirectory | None = None
+    identity_sync: IdentitySync | None = None
     consent: ConsentStore | None = None
     scheduler: ProactiveScheduler | None = None
     diary: DiaryService | None = None
@@ -153,6 +155,7 @@ def build_services(root):
     services.relationships = RelationshipEngine(config, db)
     services.memory = MemoryEngine(config, db)
     services.identities = IdentityDirectory(services)
+    services.identity_sync = IdentitySync(services)
     services.consent = ConsentStore(config, db)
     services.diary = DiaryService(config, db)
     services.qzone = QZoneService(services)
@@ -256,9 +259,11 @@ def create_web_app(root: Path, services=None):
         await s.reflection.startup()
         await s.emoji.startup()
         await s.plugins.startup()
+        await s.identity_sync.startup()
         try:
             yield
         finally:
+            await s.identity_sync.close()
             await s.plugins.close()
             await s.reflection.close()
             await s.emoji.close()
@@ -391,8 +396,47 @@ def create_web_app(root: Path, services=None):
         }
 
     @app.get("/api/identities", dependencies=[Depends(authorized)])
-    async def identities(query: str = ""):
-        return await asyncio.to_thread(s.identities.listing, query[:100])
+    async def identities(
+        query: str = "",
+        offset: int = Query(default=0, ge=0, le=1000000),
+        limit: int = Query(default=100, ge=1, le=100),
+    ):
+        return await asyncio.to_thread(s.identities.listing, query[:100], offset, limit)
+
+    @app.get("/api/identities/{bot_id}/{user_id}/history", dependencies=[Depends(authorized)])
+    async def identity_history(bot_id: str, user_id: str):
+        if not s.identities.valid_qq(bot_id) or not s.identities.valid_qq(user_id):
+            raise HTTPException(422, "QQ号格式无效")
+        return await asyncio.to_thread(s.identities.history, bot_id, user_id)
+
+    @app.delete(
+        "/api/identities/{bot_id}/{user_id}/history/{key}", dependencies=[Depends(authorized)]
+    )
+    async def identity_history_delete(
+        bot_id: str, user_id: str, key: int, last_seen: float = Query(ge=0, allow_inf_nan=False)
+    ):
+        try:
+            await asyncio.to_thread(s.identities.forget_name, bot_id, user_id, key, last_seen)
+        except LookupError:
+            raise HTTPException(404, "历史名称已不存在") from None
+        return {"ok": True}
+
+    @app.get("/api/identity-sync", dependencies=[Depends(authorized)])
+    async def identity_sync_status():
+        return s.identity_sync.status()
+
+    @app.post("/api/identity-sync", dependencies=[Depends(authorized)])
+    async def identity_sync_start(data: SyncRequest):
+        try:
+            return await s.identity_sync.begin(data)
+        except StateConflict:
+            raise
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+
+    @app.post("/api/identity-sync/cancel", dependencies=[Depends(authorized)])
+    async def identity_sync_cancel():
+        return await s.identity_sync.cancel()
 
     @app.get("/api/bootstrap")
     def bootstrap(request: Request):

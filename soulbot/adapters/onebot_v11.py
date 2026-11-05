@@ -76,6 +76,20 @@ class NoneBotTransport:
             raise ValueError("空间发布连接或审批已失效")
         return await bot.call_api("send_qzone_msg", content=content, images=[], ugc_right=ugc_right)
 
+    async def directory_friends(self, bot_id):
+        async with asyncio.timeout(15):
+            return await nonebot.get_bot(bot_id).call_api("get_friend_list")
+
+    async def directory_groups(self, bot_id):
+        async with asyncio.timeout(15):
+            return await nonebot.get_bot(bot_id).call_api("get_group_list")
+
+    async def directory_members(self, bot_id, group_id):
+        async with asyncio.timeout(15):
+            return await nonebot.get_bot(bot_id).call_api(
+                "get_group_member_list", group_id=int(group_id)
+            )
+
     async def fetch_record(self, event):
         # Current NapCat emits an opaque UUID. Never send arbitrary URLs/paths to it.
         if not event.record_file or not re.fullmatch(
@@ -258,6 +272,7 @@ def create_runtime(services):
     nonebot.get_app().mount("/", web)
 
     async def shutdown():
+        await services.identity_sync.close()
         await services.plugins.close()
         await services.reflection.close()
         await services.emoji.close()
@@ -281,6 +296,7 @@ def create_runtime(services):
     driver.on_startup(services.reflection.startup)
     driver.on_startup(services.emoji.startup)
     driver.on_startup(services.plugins.startup)
+    driver.on_startup(services.identity_sync.startup)
     import uvicorn
 
     config = uvicorn.Config(

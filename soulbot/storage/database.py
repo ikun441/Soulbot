@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 19:
+            if version > 20:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -427,3 +427,38 @@ class Database:
                 from soulbot.storage.relationship_migration import merge_global_relationships
 
                 merge_global_relationships(db)
+
+            if version < 20:
+                additions = {
+                    "proactive_jobs": {
+                        "attachments_json": "TEXT NOT NULL DEFAULT '[]'",
+                        "delivered_parts": "INTEGER NOT NULL DEFAULT 0",
+                    },
+                    "identity_accounts": {
+                        "remark": "TEXT NOT NULL DEFAULT ''",
+                        "is_friend": "INTEGER",
+                        "friends_synced_at": "REAL",
+                    },
+                }
+                changes = []
+                for table, fields in additions.items():
+                    present = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+                    changes.extend(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {kind};"
+                        for name, kind in fields.items()
+                        if name not in present
+                    )
+                db.executescript(
+                    "BEGIN IMMEDIATE;\n"
+                    + "\n".join(changes)
+                    + """
+                    CREATE TABLE IF NOT EXISTS identity_aliases (
+                        id INTEGER PRIMARY KEY, bot_id TEXT NOT NULL,user_id TEXT NOT NULL,
+                        group_id TEXT NOT NULL DEFAULT '',kind TEXT NOT NULL,name TEXT NOT NULL,
+                        first_seen REAL NOT NULL,last_seen REAL NOT NULL,
+                        UNIQUE(bot_id,user_id,group_id,kind,name));
+                    CREATE INDEX IF NOT EXISTS identity_aliases_user ON identity_aliases(bot_id,user_id,last_seen);
+                    UPDATE metadata SET value='20' WHERE key='schema_version';
+                    COMMIT;
+                """
+                )

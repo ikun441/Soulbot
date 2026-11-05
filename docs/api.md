@@ -262,3 +262,18 @@ GET `/api/identities?query=` 为管理员提供账号、平台昵称、群名片
 有有效usage的上述失败以及流式中断，`llm_usage`保存 `status=failed`、真实输入/输出/推理Token、estimated=0及可计算费用。缺少usage时仍为uncertain并保留估算；费用未知不记为免费。每次尝试计入任务统计，截断不会在同服务自动重试。
 
 连接、工具及视觉验证各自的输出请求上限为512，最终由实例单次输出上限、模型上下文共同裁剪，不绕过已配置上限。视觉验证通过只保存 `supports_vision=true`，不会自动打开 `vision.enabled`。
+
+
+## v2.2.0 主动媒体与账号名录
+
+POST `/api/proactive/jobs` 新增 `attachments:[{"reference":"media:<id>"}]`，至多2个。引用支持emoji/media/audio的32位素材ID，必须为管理端可读素材；拒绝任意网址或文件路径。content可为空，但文字与附件至少一项。保存时复制并记录校验和，收件人、内容和附件不可变；相同request_id重试不重复创建，文字旧客户端的幂等请求保持兼容。
+
+任务返回attachments的kind/mime/size/预览URL及delivered_parts（已完整确认的文字或附件部分数，不是QQ消息条数；合成语音标识单独发送）。GET `/api/proactive/jobs/{id}/attachments/{index}` 仅管理员可访问，禁止缓存。通过原review接口审批，派送继续检查QQ私聊授权、免打扰、窗口、次数和每类媒体权限。部分成功、超时或中断统一保留消耗并标未确认，不自动重试；附件内容变化时停止派送。文字任务保留90秒租约，媒体任务180秒租约、120秒派送超时。
+
+`proactive.auto_media` 可选none（默认）、emoji、voice，仅在auto_drafts及授权策略允许时生成待审批素材。emoji仅能选服务端提供的候选ID，voice使用已配置TTS并计入费用。所有AI候选仍需管理员审批，局部/全局记忆按统一配置检索，关系与身份基于真实收件人。
+
+GET `/api/identities?query=&offset=0&limit=50` 支持QQ、昵称、备注、群名片和历史名称检索，limit最多100。is_friend为1/0/null，分别表示最近一次完整好友同步时是好友/不是好友/尚未核实；friends_synced_at表示核实时刻。好友关系和称呼不授予系统权限。GET `/api/identities/{bot}/{user}/history` 返回名称历史；DELETE同路径加`/{id}?last_seen=<timestamp>`删除单条，更新冲突返回409。删除历史不修改平台当前名称，下次平台观察可能重新记录。
+
+POST `/api/identity-sync` 需管理员，参数request_id（UUID）、bot_id、include_friends=true、include_members=true、group_ids=[]、max_groups=50（1—200）。只允许已连接机器人，指定群须属于实际返回的已加入群；群名单生效。后台只调用get_friend_list/get_group_list/get_group_member_list，15秒单请求、600秒任务总超时。GET同路径查询进度；POST `/api/identity-sync/cancel`取消。状态idle/running/completed/partial/failed/cancelled/interrupted。断点记录保留但不自动重放；单群失败继续其他群，部分成员列表不删除旧观察；取消等待正在写入的批次回滚或完成。同步不会新增好感度记录或主动联系授权。
+
+SQLite迁移至v20，新增附件/派送进度、好友备注与核验状态、名称历史。完整备份包括私有固定附件并检查待发送任务引用完整性；老代码回退须恢复升级前备份。NapCat只读契约：[官方API文档](https://napneko.github.io/onebot/api)。

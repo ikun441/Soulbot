@@ -1,8 +1,9 @@
 """Protected contact restrictions and administrator-reviewed private-message drafts."""
 
+import asyncio
 from typing import Literal
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Response
 
 from soulbot.core.consent import ContactEdit
 from soulbot.core.scheduler import JobCreate, JobReview
@@ -58,6 +59,19 @@ def install_proactive_api(app, s, authorized):
     @app.post("/api/proactive/jobs", dependencies=protected)
     def create(data: JobCreate):
         return change(lambda: s.scheduler.create(data))
+
+    @app.get("/api/proactive/jobs/{key}/attachments/{index}", dependencies=protected)
+    async def attachment(key: str, index: int):
+        try:
+            metadata = await asyncio.to_thread(s.scheduler.media.metadata, key)
+            payload = await asyncio.to_thread(s.scheduler.media.read, key, index, metadata)
+        except LookupError:
+            raise HTTPException(404, "任务不存在") from None
+        return Response(
+            payload.data,
+            media_type=payload.mime,
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
 
     @app.post("/api/proactive/jobs/{key}/review", dependencies=protected)
     def review(key: str, data: JobReview):
