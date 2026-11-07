@@ -2,7 +2,7 @@
 
 # SoulBot
 
-**v2.2.0** · Python / NoneBot2 / FastAPI / SQLite / 原生 WebUI
+**v2.2.1** · Python / NoneBot2 / FastAPI / SQLite / 原生 WebUI
 
 可配置人格、模拟情绪、好感度、长期记忆、自主社交与多模态 QQ 机器人。粉色渐变毛玻璃界面支持图片、GIF 和视频壁纸。人格与情绪属于软件模拟，不代表真实意识或主观情感。
 
