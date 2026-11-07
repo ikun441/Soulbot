@@ -70,11 +70,28 @@ class NoneBotTransport:
     async def qzone_capability(self, bot_id):
         return await probe_qzone(nonebot.get_bot(bot_id), bot_id)
 
-    async def qzone_publish(self, bot_id, content, ugc_right, connection, guard):
+    async def qzone_publish(self, bot_id, content, ugc_right, connection, guard, images=None):
         bot = nonebot.get_bot(bot_id)
         if bot is not connection or not guard():
             raise ValueError("空间发布连接或审批已失效")
-        return await bot.call_api("send_qzone_msg", content=content, images=[], ugc_right=ugc_right)
+        payloads = images or []
+        if len(payloads) > 3 or any(
+            not isinstance(item, ImagePayload) or len(item.data) > 4 * 1024 * 1024
+            for item in payloads
+        ):
+            raise ValueError("空间图片数量或大小无效")
+        for item in payloads:
+            from soulbot.services.media_service import inspect_image
+
+            inspect_image(item.data)
+        if bot is not nonebot.get_bot(bot_id) or not guard():
+            raise ValueError("空间发布权限或连接已变化")
+        return await bot.call_api(
+            "send_qzone_msg",
+            content=content,
+            images=["base64://" + base64.b64encode(item.data).decode() for item in payloads],
+            ugc_right=ugc_right,
+        )
 
     async def directory_friends(self, bot_id):
         async with asyncio.timeout(15):

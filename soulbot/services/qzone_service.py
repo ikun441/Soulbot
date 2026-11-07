@@ -17,6 +17,7 @@ from soulbot.core.permissions import Permission, PermissionEngine
 from soulbot.core.social_state import StateConflict
 from soulbot.providers.llm.base import ProviderError
 from soulbot.services.config_service import Model
+from soulbot.services.qzone_images import QZoneImageInput, QZoneImages
 
 AUDIENCES = {"friends": 4, "self": 64, "public": 1}
 STATUS = {
@@ -39,6 +40,7 @@ class DraftCreate(Model):
     content: str = Field(min_length=1, max_length=2000)
     audience: Literal["friends", "self", "public"] = "friends"
     mode: Literal["manual", "ai"] = "manual"
+    images: list[QZoneImageInput] = Field(default_factory=list, max_length=3)
 
     @field_validator("content")
     @classmethod
@@ -52,6 +54,7 @@ class DraftEdit(Model):
     revision: int = Field(ge=0, strict=True)
     content: str = Field(min_length=1, max_length=2000)
     audience: Literal["friends", "self", "public"]
+    images: list[QZoneImageInput] | None = Field(default=None, max_length=3)
     clean = field_validator("content")(DraftCreate.clean.__func__)
 
 
@@ -84,6 +87,7 @@ class QZoneService:
         self.task = None
         self.closed = False
         self.tick_lock = asyncio.Lock()
+        self.images = QZoneImages(services)
 
     @staticmethod
     def digest(value):
@@ -92,7 +96,11 @@ class QZoneService:
         ).hexdigest()
 
     def content_hash(self, row):
-        return self.digest([row["bot_id"], row["content"], row["audience"]])
+        payload = [row["bot_id"], row["content"], row["audience"]]
+        images = json.loads(row["images_json"])
+        if images:
+            payload.append([item["sha256"] for item in images])
+        return self.digest(payload)
 
     def record(self, db, key, status, reason=""):
         db.execute(
@@ -124,6 +132,8 @@ class QZoneService:
 
     def public(self, row):
         item = dict(row)
+        item["images"] = self.images.public(row, json.loads(item.pop("images_json")))
+        item.pop("images_key", None)
         for name in ("input_hash", "approved_hash", "lease_until"):
             item.pop(name, None)
         item["status_label"] = (
@@ -168,8 +178,11 @@ class QZoneService:
                 ],
             }
 
-    async def create(self, data, *, autonomous=False, from_chat=False):
-        fingerprint = self.digest(data.model_dump(mode="json"))
+    async def create(self, data, *, autonomous=False, from_chat=False, image_scope="admin"):
+        payload = data.model_dump(mode="json")
+        if not data.images:
+            payload.pop("images")
+        fingerprint = self.digest(payload)
         if from_chat and (autonomous or data.mode != "manual"):
             raise ValueError("QQ 工具只能保存已经提供正文的草稿")
         source = (
@@ -183,49 +196,69 @@ class QZoneService:
         )
         if data.mode == "ai" and self.content_issues(data.content):
             raise ValueError("公开主题包含疑似私人信息，请先移除")
-        with self.s.db.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            self.recover(db)
-            old = db.execute(
-                "SELECT * FROM qzone_drafts WHERE request_id=?", (str(data.request_id),)
-            ).fetchone()
-            if old:
-                if old["input_hash"] != fingerprint:
-                    raise StateConflict("同一请求标识不能用于不同草稿")
-                return self.public(old)
-            if (
-                db.execute(
-                    "SELECT COUNT(*) FROM qzone_drafts WHERE status IN ('generating','pending_approval','approved')"
-                ).fetchone()[0]
-                >= 200
-            ):
-                raise ValueError("请先处理待完成草稿（最多 200 条）")
-            if (
-                data.mode == "ai"
-                and db.execute(
-                    "SELECT 1 FROM qzone_drafts WHERE source IN ('ai_public_topic','autonomous_public_topic') AND created_at>?",
-                    (self.clock() - 60,),
+        generation_policy = self.auto_policy_key() if autonomous else None
+        images_key = None
+        try:
+            with self.s.db.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                self.recover(db)
+                old = db.execute(
+                    "SELECT * FROM qzone_drafts WHERE request_id=?", (str(data.request_id),)
                 ).fetchone()
-            ):
-                raise ValueError("AI 起草每分钟最多一次")
-            status = "generating" if data.mode == "ai" else "pending_approval"
-            key = db.execute(
-                """INSERT INTO qzone_drafts(request_id,input_hash,bot_id,content,audience,source,status,reason,created_at,updated_at,lease_until)
-                VALUES (?,?,?,?,?,?,?,'',?,?,?)""",
-                (
-                    str(data.request_id),
-                    fingerprint,
-                    data.bot_id,
-                    "" if data.mode == "ai" else data.content,
-                    data.audience,
-                    source,
-                    status,
-                    self.clock(),
-                    self.clock(),
-                    self.clock() + 120 if data.mode == "ai" else None,
-                ),
-            ).lastrowid
-            self.record(db, key, status)
+                if old:
+                    if old["input_hash"] != fingerprint:
+                        raise StateConflict("同一请求标识不能用于不同草稿")
+                    return self.public(old)
+                if (
+                    db.execute(
+                        "SELECT COUNT(*) FROM qzone_drafts WHERE status IN ('generating','pending_approval','approved')"
+                    ).fetchone()[0]
+                    >= 200
+                ):
+                    raise ValueError("请先处理待完成草稿（最多 200 条）")
+                if (
+                    data.mode == "ai"
+                    and db.execute(
+                        "SELECT 1 FROM qzone_drafts WHERE source IN ('ai_public_topic','autonomous_public_topic') AND created_at>?",
+                        (self.clock() - 60,),
+                    ).fetchone()
+                ):
+                    raise ValueError("AI 起草每分钟最多一次")
+                status = "generating" if data.mode == "ai" else "pending_approval"
+                images_key = uuid4().hex if data.images else ""
+                images = (
+                    self.images.pin(images_key, data.images, image_scope) if data.images else []
+                )
+                key = db.execute(
+                    """INSERT INTO qzone_drafts(request_id,input_hash,bot_id,content,audience,source,status,reason,created_at,updated_at,lease_until,images_key,images_json)
+                    VALUES (?,?,?,?,?,?,?,'',?,?,?,?,?)""",
+                    (
+                        str(data.request_id),
+                        fingerprint,
+                        data.bot_id,
+                        "" if data.mode == "ai" else data.content,
+                        data.audience,
+                        source,
+                        status,
+                        self.clock(),
+                        self.clock(),
+                        self.clock()
+                        + (
+                            150 + self.s.config.current.image_generation.timeout_seconds
+                            if autonomous and self.s.config.current.qzone.auto_image == "generated"
+                            else 120
+                        )
+                        if data.mode == "ai"
+                        else None,
+                        images_key,
+                        json.dumps(images),
+                    ),
+                ).lastrowid
+                self.record(db, key, status)
+        except BaseException:
+            if images_key:
+                self.images.discard(images_key)
+            raise
         if data.mode == "ai":
             try:
                 samples = await asyncio.to_thread(self.s.experiences.sample, purpose="qzone")
@@ -258,10 +291,23 @@ class QZoneService:
                 content = DraftCreate.clean(result.text)
                 if len(content) > 2000 or result.tool_calls:
                     raise ValueError("模型未返回受支持的纯文字草稿")
+                generated_images = []
+                if (
+                    autonomous
+                    and not data.images
+                    and generation_policy == self.auto_policy_key()
+                    and not self.content_issues(content)
+                ):
+                    generated_images = await self.auto_images(data.content, data.bot_id)
+                if autonomous and generation_policy != self.auto_policy_key():
+                    generated_images = []  # Keep the text draft for review; the scheduler stops publication.
+                if generated_images:
+                    images_key = uuid4().hex
+                    images = self.images.pin(images_key, generated_images)
                 with self.s.db.connect() as db:
                     changed = db.execute(
-                        "UPDATE qzone_drafts SET content=?,status='pending_approval',lease_until=NULL,updated_at=?,revision=revision+1 WHERE id=? AND status='generating'",
-                        (content, self.clock(), key),
+                        "UPDATE qzone_drafts SET content=?,images_key=?,images_json=?,status='pending_approval',lease_until=NULL,updated_at=?,revision=revision+1 WHERE id=? AND status='generating'",
+                        (content, images_key or "", json.dumps(images), self.clock(), key),
                     ).rowcount
                     if changed:
                         self.record(db, key, "pending_approval")
@@ -282,18 +328,42 @@ class QZoneService:
         return self.get(key)
 
     def edit(self, key, data):
-        with self.s.db.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = self.row(db, key)
-            if row["revision"] != data.revision or row["status"] not in EDITABLE:
-                raise StateConflict("草稿已变化或无法编辑，请刷新")
-            db.execute(
-                "UPDATE qzone_drafts SET content=?,audience=?,status='pending_approval',reason='',approved_hash=NULL,approved_owner=NULL,approved_at=NULL,updated_at=?,revision=revision+1 WHERE id=?",
-                (data.content, data.audience, self.clock(), key),
-            )
-            self.record(db, key, "pending_approval", "edited")
+        new_key = None
+        try:
+            with self.s.db.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = self.row(db, key)
+                if row["revision"] != data.revision or row["status"] not in EDITABLE:
+                    raise StateConflict("草稿已变化或无法编辑，请刷新")
+                image_key, metadata = row["images_key"], json.loads(row["images_json"])
+                if data.images is not None:
+                    new_key = uuid4().hex if data.images else ""
+                    metadata = self.images.pin(new_key, data.images) if data.images else []
+                    image_key = new_key
+                db.execute(
+                    "UPDATE qzone_drafts SET content=?,audience=?,images_key=?,images_json=?,status='pending_approval',reason='',approved_hash=NULL,approved_owner=NULL,approved_at=NULL,updated_at=?,revision=revision+1 WHERE id=?",
+                    (
+                        data.content,
+                        data.audience,
+                        image_key,
+                        json.dumps(metadata),
+                        self.clock(),
+                        key,
+                    ),
+                )
+                self.record(db, key, "pending_approval", "edited")
+        except BaseException:
+            if new_key:
+                self.images.discard(new_key)
+            raise
         self.s.db.audit("qzone_draft_edited")
         return self.get(key)
+
+    def image_payloads(self, row):
+        metadata = json.loads(row["images_json"])
+        return [
+            self.images.read(row["images_key"], index, metadata) for index in range(len(metadata))
+        ]
 
     def review(self, key, data):
         with self.s.db.connect() as db:
@@ -311,6 +381,8 @@ class QZoneService:
                 data.action
             ]
             approved = status == "approved"
+            if approved:
+                self.image_payloads(row)
             db.execute(
                 "UPDATE qzone_drafts SET status=?,reason='',approved_hash=?,approved_owner=?,approved_at=?,updated_at=?,revision=revision+1 WHERE id=?",
                 (
@@ -368,6 +440,8 @@ class QZoneService:
             "autonomous_state": json.loads(self.s.db.get("qzone_auto_state") or "{}"),
             "autonomous_wait_reason": self.auto_reason(),
             "approval_lifetime_hours": 24,
+            "image_limit": 3,
+            "autonomous_image": self.s.config.current.qzone.auto_image,
             **quota,
         }
 
@@ -456,10 +530,14 @@ class QZoneService:
                 or not self.allowed(row, autonomous=autonomous)
             ):
                 raise StateConflict("请检查发布开关、主人 QQ、隐私提示和当前审批模式")
+        with self.s.db.connect() as db:
+            await asyncio.to_thread(self.image_payloads, dict(self.row(db, key)))
         transport = self.s.qq_transport
         capability = await self.capability(initial["bot_id"])
         if not capability.get("supported") or not capability.get("connection"):
             raise ValueError("未确认当前账号的已核实接口能力，已保留草稿")
+        if initial["images"] and not capability.get("images_supported"):
+            raise ValueError("当前适配层尚未声明已核实的空间图片能力，已保留草稿")
         with self.s.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             self.recover(db)
@@ -476,13 +554,14 @@ class QZoneService:
                 raise StateConflict(
                     "未到下次发布窗口：至少间隔 72 小时、滚动 7 天最多两次；不确定结果也计入"
                 )
+            images = self.image_payloads(row)
             now = self.clock()
             db.execute(
                 "INSERT INTO qzone_attempts VALUES (?,?,?,'reserved')", (key, row["bot_id"], now)
             )
             db.execute(
                 "UPDATE qzone_drafts SET status='publishing',lease_until=?,updated_at=?,revision=revision+1 WHERE id=?",
-                (now + 90, now, key),
+                (now + (150 if images else 90), now, key),
             )
             self.record(
                 db,
@@ -509,13 +588,18 @@ class QZoneService:
 
         status, tid = "uncertain", None
         try:
-            async with asyncio.timeout(30):
-                result = await transport.qzone_publish(
+            async with asyncio.timeout(105 if images else 30):
+                publish_args = (
                     payload["bot_id"],
                     payload["content"],
                     AUDIENCES[payload["audience"]],
                     capability["connection"],
                     guard,
+                )
+                result = (
+                    await transport.qzone_publish(*publish_args, images=images)
+                    if images
+                    else await transport.qzone_publish(*publish_args)
                 )
             if (
                 isinstance(result, dict)
@@ -541,10 +625,51 @@ class QZoneService:
             self.s.db.audit("qzone_publish_result", status)
         return self.get(key)
 
+    async def auto_images(self, topic, bot_id):
+        cfg = self.s.config.current
+        if cfg.qzone.auto_image == "none":
+            return []
+        if cfg.qzone.auto_image == "emoji":
+            if not cfg.emoji.enabled or cfg.tools.select_emoji != "auto":
+                raise ValueError("表情配图权限已关闭")
+            choices = (await asyncio.to_thread(self.s.emoji.search, topic, 6))["items"]
+            if not choices and cfg.emoji.browse_enabled:
+                choices = (await asyncio.to_thread(self.s.emoji.browse, 0, 6))["items"]
+            if not choices:
+                raise ValueError("没有适合公开主题的表情候选")
+            return [QZoneImageInput(reference="emoji:" + choices[0]["id"])]
+        if not cfg.image_generation.enabled or cfg.tools.generate_image != "auto":
+            raise ValueError("生图权限已关闭")
+        from soulbot.core.events import ChatEvent
+
+        event = ChatEvent(
+            bot_id, cfg.personality.owner_qq, "qzone-auto-image", topic, directed=True
+        )
+        await self.s.action_memory.collect(event, topic, "qzone_auto_image")
+        # Only the configured public topic is sent to the image service, never chat or memory samples.
+        result = await self.s.images.generate(
+            "绘制适合公开分享的插画，不含姓名、联系方式或私人身份信息。公开主题：" + topic,
+            "qzone_autonomous",
+        )
+        item = await asyncio.to_thread(self.s.media.save, result.data, "image_generation")
+        return [QZoneImageInput(reference="media:" + item["id"])]
+
     def auto_policy_key(self):
         cfg = self.s.config.current
         return self.digest(
-            [cfg.qzone.model_dump(), cfg.personality.owner_qq, cfg.automation.paused]
+            [
+                cfg.qzone.model_dump(),
+                cfg.personality.owner_qq,
+                cfg.automation.paused,
+                [
+                    cfg.image_generation.model_dump(),
+                    cfg.emoji.enabled,
+                    cfg.tools.generate_image,
+                    cfg.tools.select_emoji,
+                ]
+                if cfg.qzone.auto_image != "none"
+                else None,
+            ]
         )
 
     def auto_reason(self):
@@ -560,6 +685,18 @@ class QZoneService:
             and datetime.fromtimestamp(self.clock(), ZoneInfo(cfg.soulbot.timezone)).hour < 8
         ):
             return "quiet_hours"
+        if cfg.qzone.auto_image == "generated" and (
+            not cfg.image_generation.enabled
+            or cfg.tools.generate_image != "auto"
+            or not self.s.images.configured()
+        ):
+            return "image_unavailable"
+        if cfg.qzone.auto_image == "emoji":
+            if not cfg.emoji.enabled or cfg.tools.select_emoji != "auto":
+                return "image_unavailable"
+            with self.s.db.connect() as db:
+                if not db.execute("SELECT 1 FROM emoji_index LIMIT 1").fetchone():
+                    return "image_unavailable"
         if any(self.content_issues(topic) for topic in cfg.qzone.auto_topics):
             return "private_topic"
         transport = self.s.qq_transport
@@ -591,6 +728,7 @@ class QZoneService:
         if self.tick_lock.locked():
             return
         async with self.tick_lock:
+            await asyncio.to_thread(self.images.cleanup, self.clock())
             if self.auto_reason():
                 return
             now = self.clock()
@@ -607,7 +745,12 @@ class QZoneService:
                 if state.get("lease_until", 0) > now or state.get("next_check_at", 0) > now:
                     return
                 state = {
-                    "lease_until": now + 180,
+                    "lease_until": now
+                    + (
+                        max(180, 150 + self.s.config.current.image_generation.timeout_seconds)
+                        if self.s.config.current.qzone.auto_image == "generated"
+                        else 180
+                    ),
                     "next_check_at": now + 600 + random.uniform(0, 60),
                     "reason": "evaluating",
                     "request_id": str(uuid4()),
@@ -674,7 +817,11 @@ class QZoneService:
                 self.auto_state(lease_id=state["request_id"], reason="deferred")
                 self.s.db.audit("qzone_autonomous_deferred")
             finally:
-                self.auto_state(lease_id=state["request_id"], lease_until=0)
+                self.auto_state(
+                    lease_id=state["request_id"],
+                    lease_until=0,
+                    next_check_at=max(state["next_check_at"], self.clock() + 600),
+                )
 
     async def startup(self):
         if self.task and not self.task.done():

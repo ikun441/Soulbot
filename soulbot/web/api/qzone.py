@@ -1,6 +1,8 @@
 """Administrator-only QZone drafts and explicit publication; no model approval endpoint."""
 
-from fastapi import Depends, HTTPException, Query
+import asyncio
+
+from fastapi import Depends, HTTPException, Query, Response
 
 from soulbot.core.social_state import StateConflict
 from soulbot.providers.llm.base import ProviderError
@@ -54,6 +56,28 @@ def install_qzone_api(app, s, authorized):
     @app.get("/api/qzone/drafts/{key}", dependencies=protected)
     def detail(key: int):
         return sync(lambda: s.qzone.get(key))
+
+    @app.get("/api/qzone/drafts/{key}/images/{index}", dependencies=protected)
+    async def image(key: int, index: int, revision: int = Query(ge=0)):
+        def read():
+            with s.db.connect() as db:
+                row = s.qzone.row(db, key)
+                if row["revision"] != revision:
+                    raise StateConflict("草稿已更新，请刷新图片预览")
+                values = s.qzone.image_payloads(row)
+                if not 0 <= index < len(values):
+                    raise LookupError
+                return values[index]
+
+        try:
+            payload = await asyncio.to_thread(read)
+        except LookupError:
+            raise HTTPException(404, "空间图片不存在") from None
+        return Response(
+            payload.data,
+            media_type=payload.mime,
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
 
     @app.put("/api/qzone/drafts/{key}", dependencies=protected)
     def edit(key: int, data: DraftEdit):

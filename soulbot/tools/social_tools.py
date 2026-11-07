@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 from datetime import date
 from uuid import NAMESPACE_URL, uuid5
 
@@ -9,6 +10,7 @@ from pydantic import Field, field_validator
 
 from soulbot.core.memory import MemoryKind
 from soulbot.services.config_service import Model
+from soulbot.services.qzone_images import QZoneImageInput
 from soulbot.services.qzone_service import DraftCreate
 from soulbot.services.search_service import SearchRequest
 from soulbot.tools.registry import Tool
@@ -53,6 +55,7 @@ class CreateDiary(Model):
 
 
 class CreateQZoneDraft(Model):
+    images: list[QZoneImageInput] = Field(default_factory=list, max_length=3)
     content: str = Field(min_length=1, max_length=2000)
     clean = field_validator("content")(DraftCreate.clean.__func__)
 
@@ -130,7 +133,11 @@ def register_social_tools(s):
             raise PermissionError("只有主人私聊可以请求空间草稿，请启用空间功能")
         if s.qzone.content_issues(args.content):
             raise PermissionError("草稿包含疑似私人信息，未保存")
-        digest = hashlib.sha256(args.content.encode()).hexdigest()
+        digest = hashlib.sha256(
+            (
+                args.content if not args.images else json.dumps(args.model_dump(), sort_keys=True)
+            ).encode()
+        ).hexdigest()
         request_id = uuid5(NAMESPACE_URL, "soulbot:qzone-draft:" + current.key + ":" + digest)
         row = await s.qzone.create(
             DraftCreate(
@@ -138,8 +145,10 @@ def register_social_tools(s):
                 bot_id=current.bot_id,
                 content=args.content,
                 audience=cfg.qzone.auto_audience,
+                images=args.images,
             ),
             from_chat=True,
+            image_scope=current.scope,
         )
         published = row["status"] == "published" and bool(row["tid"])
         message = (
@@ -177,7 +186,7 @@ def register_social_tools(s):
         ),
         (
             "create_qzone_draft",
-            "仅限主人私聊：把适合公开的正文保存为 QQ 空间草稿，未发布。账号与受众由系统配置，不得引用私人记忆。",
+            "仅限主人私聊：保存公开正文及可选生成图片/卡片或本地表情引用，最多3图；不接受私聊照片、头像、网址或路径。只保存草稿，不发布；账号与受众由系统配置。",
             CreateQZoneDraft,
             qzone_draft,
         ),

@@ -27,6 +27,7 @@ async def probe_qzone(bot, bot_id):
     )
     return {
         "supported": supported,
+        "images_supported": supported,
         "state": "verified_contract" if supported else "unverified_version",
         "message": "账号在线，接口版本已核实；最终发布仍以平台 tid 回执为准"
         if supported

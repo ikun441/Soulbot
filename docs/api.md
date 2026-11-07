@@ -49,7 +49,7 @@
 | image_generation.provider / comfy | openai_compatible 或 comfyui；本地固定 checkpoint 工作流，不接受任意节点输入 |
 | proactive | 用户 opt-in、待审批队列、持久每日次数和随机时间窗口 |
 | diary | enabled/live_preview/auto_generate/weekly_enabled、generation_time、min_events、fact_retention_days、delivery_mode(manual/daily/weekly)、delivery_bot_id |
-| qzone | enabled/require_approval/autonomous_enabled、auto_bot_id/auto_audience(self/friends/public)/auto_topics；72h 间隔及7天最多2条 |
+| qzone | enabled/require_approval/autonomous_enabled、auto_bot_id/auto_audience(self/friends/public)/auto_topics/auto_image(none/emoji/generated)；72h 间隔及7天最多2条 |
 | search | SearXNG base_url/enabled/timeout_seconds/max_results/max_calls_per_minute/max_calls_per_day/price_cny_per_request；未知价不当作0，不暂停调用 |
 | exploration | enabled/interval_minutes/max_daily_tasks/topics，默认关闭，只存本地 |
 | automation.paused | 统一暂停自主外发、探索和自动日记/推送，不清除用户授权或重置额度 |
@@ -66,7 +66,7 @@
 | --- | --- |
 | discover_tools | `names` 每次最多3个；只从服务端为当前会话提供的工具中载入参数说明，不能授予权限或执行动作 |
 | create_diary | `day` 可选，省略为今天；会话取自服务端，只汇总本会话确认活动，不接受正文或其他身份 |
-| create_qzone_draft | `content`；仅主人私聊，账号和受众取服务端，保存 model_chat_draft 来源，不调用发布接口 |
+| create_qzone_draft | `content`、可选 `images:[{reference}]`（最多3张）；仅主人私聊，账号和受众取服务端，保存 model_chat_draft 来源，不调用发布接口 |
 | search_web | 公开搜索，不下载结果地址，不执行网页指令 |
 | retrieve_memory / browse_memory | query、offset；全局模式查询所有已审核有效授权记忆并标注来源，关闭全局后限定当前会话 |
 | save_memory | content、importance；仅保存待审核且未授予长期权限的候选 |
@@ -277,3 +277,18 @@ GET `/api/identities?query=&offset=0&limit=50` 支持QQ、昵称、备注、群�
 POST `/api/identity-sync` 需管理员，参数request_id（UUID）、bot_id、include_friends=true、include_members=true、group_ids=[]、max_groups=50（1—200）。只允许已连接机器人，指定群须属于实际返回的已加入群；群名单生效。后台只调用get_friend_list/get_group_list/get_group_member_list，15秒单请求、600秒任务总超时。GET同路径查询进度；POST `/api/identity-sync/cancel`取消。状态idle/running/completed/partial/failed/cancelled/interrupted。断点记录保留但不自动重放；单群失败继续其他群，部分成员列表不删除旧观察；取消等待正在写入的批次回滚或完成。同步不会新增好感度记录或主动联系授权。
 
 SQLite迁移至v20，新增附件/派送进度、好友备注与核验状态、名称历史。完整备份包括私有固定附件并检查待发送任务引用完整性；老代码回退须恢复升级前备份。NapCat只读契约：[官方API文档](https://napneko.github.io/onebot/api)。
+
+
+## v2.3.0 空间配图
+
+POST `/api/qzone/drafts` 接受 `images:[{"reference":"media:<32位ID>"}]` 或 `emoji:<32位ID>`，最多3张，默认空。管理员先通过 `/api/media/upload` 上传；只能用不透明引用，不接受网址或文件路径。重复 request_id 的相同请求返回同一固定草稿，不重新读取已过期源素材。
+
+PUT `/api/qzone/drafts/{key}` 中 images 省略/null 表示保留、[] 表示移除，非空则整体替换。正文、受众或图片修改均递增 revision 并使审批失效。返回 images 仅含受保护预览URL、mime、宽高与大小，不暴露物理路径或内部哈希。GET `/api/qzone/drafts/{key}/images/{index}?revision=N` 需要管理员会话；旧版本返回409，不存在返回404，图片缺失/变化返回422，响应禁止缓存。
+
+原图最多16MB，解码像素限制沿用媒体服务；固定副本转为去EXIF的JPEG，最长边2048px、每图最多4MB，透明区域合成白底。原素材过期不影响草稿。发布及审批重新校验副本；修改、缺失、未确认图片能力时不占发布额度。已提交到平台的超时/中断保留额度，状态uncertain，不自动重试。
+
+能力探测新增 images_supported，仅已核实的NapCat 4.18.38契约声明支持。实际发送采用 send_qzone_msg 的 base64:// 图片数组及 ugc_right，以有效tid确认成功。[官方契约](https://github.com/NapNeko/NapCatQQ/blob/v4.18.38/packages/napcat-onebot/action/extends/SendQzoneMsg.ts)。
+
+`qzone.auto_image` 默认为none，可设emoji或generated。后者只向图片Provider发送配置的公开主题，不上传聊天、记忆采样；调用前检索动作记忆，准备及发送前复核权限。关闭原有审批的用户配置继续生效，不伪造人工审批。模型create_qzone_draft可引用同会话生成图片/卡片及本地表情；拒绝聊天上传照片、头像和其他会话素材，只保存不发布。
+
+完整备份纳入data/qzone_images固定副本，校验待发布附件完整性；已结束草稿图片保留30天、无引用副本保留24小时后清理，uncertain及待处理草稿不自动清理。数据库追加迁移至v21，旧纯文字草稿与幂等请求保持兼容。

@@ -545,6 +545,7 @@ class QZoneSettings(Model):
     autonomous_enabled: bool = False
     auto_bot_id: str = Field(default="", pattern=r"^([1-9][0-9]{4,11})?$")
     auto_audience: Literal["friends", "self", "public"] = "friends"
+    auto_image: Literal["none", "emoji", "generated"] = "none"
     auto_topics: list[str] = Field(
         default_factory=lambda: ["阳光与好心情", "音乐与平凡生活里的小美好"],
         min_length=1,

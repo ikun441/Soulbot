@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 20:
+            if version > 21:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -461,4 +461,21 @@ class Database:
                     UPDATE metadata SET value='20' WHERE key='schema_version';
                     COMMIT;
                 """
+                )
+
+            if version < 21:
+                additions = {
+                    "images_key": "TEXT NOT NULL DEFAULT ''",
+                    "images_json": "TEXT NOT NULL DEFAULT '[]'",
+                }
+                present = {row[1] for row in db.execute("PRAGMA table_info(qzone_drafts)")}
+                changes = [
+                    f"ALTER TABLE qzone_drafts ADD COLUMN {name} {kind};"
+                    for name, kind in additions.items()
+                    if name not in present
+                ]
+                db.executescript(
+                    "BEGIN IMMEDIATE;\n"
+                    + "\n".join(changes)
+                    + "\nUPDATE metadata SET value='21' WHERE key='schema_version';\nCOMMIT;"
                 )

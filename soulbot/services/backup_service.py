@@ -91,6 +91,12 @@ class BackupService:
                 and re.fullmatch(r"[01]\.(png|jpg|gif|webp|mp3|wav)", path.name)
             )
             or (
+                len(path.parts) == 4
+                and path.parts[:2] == ("data", "qzone_images")
+                and re.fullmatch(r"[a-f0-9]{32}", path.parts[2])
+                and re.fullmatch(r"[0-2]\.jpg", path.name)
+            )
+            or (
                 len(path.parts) == 3
                 and path.parts[:2] == ("data", "wallpapers")
                 and re.fullmatch(r"[a-f0-9]{32}\.(png|jpg|gif|webp|mp4|webm)", path.name)
@@ -107,6 +113,7 @@ class BackupService:
             self.root / "emoji",
             self.root / "data/wallpapers",
             self.root / "data/proactive_media",
+            self.root / "data/qzone_images",
         ):
             if directory.exists():
                 candidates.extend(directory.rglob("*"))
@@ -173,6 +180,39 @@ class BackupService:
                                 > MAX_BACKUP
                             ):
                                 raise ValueError("备份超过256MB，请先清理已结束任务的附件")
+                            files[name] = content
+                columns = {r[1] for r in snapshot_db.execute("PRAGMA table_info(qzone_drafts)")}
+                if "images_json" in columns:
+                    for image_key, status, raw in snapshot_db.execute(
+                        "SELECT images_key,status,images_json FROM qzone_drafts"
+                    ):
+                        for item in json.loads(raw):
+                            name = f"data/qzone_images/{image_key}/{item['filename']}"
+                            if not self.allowed(name):
+                                raise ValueError("空间图片路径无效")
+                            path = self.root / name
+                            if not path.is_file():
+                                if status in {"generating", "pending_approval", "approved"}:
+                                    raise ValueError("待发布空间图片缺失，请先处理草稿")
+                                continue
+                            if (
+                                path.is_symlink()
+                                or path.parent.is_symlink()
+                                or path.parent.parent.is_symlink()
+                            ):
+                                raise ValueError("空间图片目录包含符号链接")
+                            if path.stat().st_size > 4 * 1024 * 1024:
+                                raise ValueError("空间图片超过大小限制")
+                            content = path.read_bytes()
+                            if hashlib.sha256(content).hexdigest() != item["sha256"]:
+                                raise ValueError("空间图片已变化，无法完整备份")
+                            if (
+                                sum(map(len, files.values()))
+                                - len(files.get(name, b""))
+                                + len(content)
+                                > MAX_BACKUP
+                            ):
+                                raise ValueError("备份超过256MB")
                             files[name] = content
         manifest = {
             "format": 1,
@@ -264,7 +304,7 @@ class BackupService:
                             "SELECT value FROM metadata WHERE key='schema_version'"
                         ).fetchone()[0]
                     )
-                    if not 1 <= version <= 20:
+                    if not 1 <= version <= 21:
                         raise ValueError
                     columns = {r[1] for r in db.execute("PRAGMA table_info(proactive_jobs)")}
                     if "attachments_json" in columns:
@@ -273,6 +313,19 @@ class BackupService:
                         ):
                             for item in json.loads(raw):
                                 name = f"data/proactive_media/{key}/{item['filename']}"
+                                if (
+                                    not self.allowed(name)
+                                    or name not in files
+                                    or hashlib.sha256(files[name]).hexdigest() != item["sha256"]
+                                ):
+                                    raise ValueError
+                    columns = {r[1] for r in db.execute("PRAGMA table_info(qzone_drafts)")}
+                    if "images_json" in columns:
+                        for image_key, raw in db.execute(
+                            "SELECT images_key,images_json FROM qzone_drafts WHERE status IN ('generating','pending_approval','approved')"
+                        ):
+                            for item in json.loads(raw):
+                                name = f"data/qzone_images/{image_key}/{item['filename']}"
                                 if (
                                     not self.allowed(name)
                                     or name not in files
