@@ -1,3 +1,5 @@
+<img width="1254" height="1254" alt="Soulbot" src="https://github.com/user-attachments/assets/21dca2f0-f1f7-4e2b-b302-3385aa274515" />
+
 # SoulBot
 
 **v2.2.0** · Python / NoneBot2 / FastAPI / SQLite / 原生 WebUI
