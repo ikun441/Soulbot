@@ -642,19 +642,44 @@ class ReflectionSettings(Model):
     max_chars: int = Field(default=2000, ge=200, le=4000)
 
 
-class SearchSettings(Model):
+class SearchEndpoint(Model):
     enabled: bool = False
     base_url: str = "http://127.0.0.1:8080"
     timeout_seconds: float = Field(default=15, ge=2, le=30, allow_inf_nan=False)
-    max_results: int = Field(default=5, ge=1, le=10)
-    max_calls_per_minute: int = Field(default=6, ge=1, le=60)
-    max_calls_per_day: int = Field(default=100, ge=1, le=1000)
     price_cny_per_request: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
 
     @field_validator("base_url")
     @classmethod
     def valid_url(cls, value):
         return LLMEndpoint.valid_url(value)
+
+
+class SearchSettings(SearchEndpoint):
+    max_results: int = Field(default=5, ge=1, le=10)
+    max_calls_per_minute: int = Field(default=6, ge=1, le=60)
+    max_calls_per_day: int = Field(default=100, ge=1, le=1000)
+    total_timeout_seconds: float = Field(default=30, ge=2, le=90, allow_inf_nan=False)
+    fallbacks: dict[str, SearchEndpoint] = Field(default_factory=dict, max_length=2)
+
+    @model_validator(mode="after")
+    def routes(self):
+        if not self.fallbacks.keys() <= {"fallback_1", "fallback_2"}:
+            raise ValueError("搜索备用服务只能使用 fallback_1 与 fallback_2")
+        from urllib.parse import urlsplit
+
+        seen = set()
+        for endpoint in [self, *(p for p in self.fallbacks.values() if p.enabled)]:
+            url = urlsplit(endpoint.base_url)
+            address = (
+                url.scheme.lower(),
+                url.hostname.lower(),
+                url.port or (443 if url.scheme == "https" else 80),
+                url.path.rstrip("/"),
+            )
+            if address in seen:
+                raise ValueError("启用的搜索服务地址不能重复")
+            seen.add(address)
+        return self
 
 
 class ExplorationSettings(Model):

@@ -175,7 +175,7 @@ class BudgetService:
             search = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT id,day,purpose,status,cost_cny,created_at FROM search_usage ORDER BY created_at DESC LIMIT 50"
+                    "SELECT u.id,u.day,u.purpose,u.status,u.cost_cny,u.created_at,COALESCE(a.provider,'primary') AS provider,a.request_id,a.error_kind FROM search_usage u LEFT JOIN search_attempts a ON a.usage_id=u.id ORDER BY u.created_at DESC,u.rowid DESC LIMIT 50"
                 )
             ]
             recognition = [

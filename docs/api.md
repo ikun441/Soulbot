@@ -292,3 +292,18 @@ PUT `/api/qzone/drafts/{key}` 中 images 省略/null 表示保留、[] 表示移
 `qzone.auto_image` 默认为none，可设emoji或generated。后者只向图片Provider发送配置的公开主题，不上传聊天、记忆采样；调用前检索动作记忆，准备及发送前复核权限。关闭原有审批的用户配置继续生效，不伪造人工审批。模型create_qzone_draft可引用同会话生成图片/卡片及本地表情；拒绝聊天上传照片、头像和其他会话素材，只保存不发布。
 
 完整备份纳入data/qzone_images固定副本，校验待发布附件完整性；已结束草稿图片保留30天、无引用副本保留24小时后清理，uncertain及待处理草稿不自动清理。数据库追加迁移至v21，旧纯文字草稿与幂等请求保持兼容。
+
+
+## v2.4.0 搜索备用路由
+
+search保留原有enabled/base_url/timeout_seconds/price_cny_per_request/max_results及频率字段，新增total_timeout_seconds（默认30，2–90秒）和fallbacks（最多2项，键fallback_1/fallback_2）。每项包含enabled（默认false）、base_url、timeout_seconds（2–30秒）和独立price_cny_per_request（未知为null）。启用地址按协议、主机、端口和路径去重，不接受凭据URL；目前均为SearXNG能力，不能当作其他Provider的替代。
+
+POST `/api/search` 仍接收query/limit。有效响应新增provider_id（primary/fallback_1/fallback_2）及attempts（provider/status/error_kind）。主服务成功或合法空结果即停止；连接、超时、限流、认证或上游不可用等错误可切换不同服务，不重试同一地址。HTTP400/422参数错误、取消、权限/配置变化、调用次数限制不继续切换。每次备用尝试同样发送搜索词，可能额外计费；所有失败保守保留费用，未知报价不作为零成本。
+
+GET `/api/search/providers` 返回各已保存端点的最近真实测试状态及15条请求尝试。编辑配置使对应状态失效，禁用后显示disabled；不发起网络请求。POST `/api/search/providers/{name}/test` 需要管理员会话、来源校验及严格JSON `{"confirm":true}`，只向所选已启用端点发送固定公开测试词，不使用备用服务。未知端点404，未启用或配置变化503，失败按Provider错误分类。
+
+WebUI离开搜索页面会中止等待；服务端检测断开后取消当前任务，不继续备用调用，已发出的尝试保留uncertain记录。工具自身或调用方的更短超时仍优先生效。服务关闭取消正在运行的搜索。
+
+SQLite v22追加search_attempts(usage_id/request_id/provider/error_kind)，与原search_usage逐项关联。search_usage保持原6列以兼容旧数据；旧记录在查询中显示primary。分钟/每日搜索上限按实际尝试计数，探索每日任务按request_id去重，备用请求不重复占探索任务数。备份恢复合并新增明细及原用量，不能通过恢复退回费用或调用额度。`/api/usage` 中search.recent新增provider/request_id/error_kind。
+
+接口契约依据：[SearXNG 官方 Search API](https://docs.searxng.org/dev/search_api.html)，使用GET /search及q/format=json/safesearch参数，结果只作为不可信资料，不下载结果链接。

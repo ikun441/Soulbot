@@ -346,7 +346,7 @@ def test_v19_upgrade_preserves_text_jobs_and_global_relationships(s):
         db.execute("DROP TABLE identity_aliases")
         db.execute("UPDATE metadata SET value='19' WHERE key='schema_version'")
     reopened = Database(s.db.path)
-    assert reopened.get("schema_version") == "21"
+    assert reopened.get("schema_version") == "22"
     assert (
         current(s, row["id"])["attachments"] == [] and current(s, row["id"])["delivered_parts"] == 0
     )

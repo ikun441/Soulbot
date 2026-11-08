@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 21:
+            if version > 22:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -479,3 +479,15 @@ class Database:
                     + "\n".join(changes)
                     + "\nUPDATE metadata SET value='21' WHERE key='schema_version';\nCOMMIT;"
                 )
+
+            if version < 22:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS search_attempts (
+                        usage_id TEXT PRIMARY KEY REFERENCES search_usage(id) ON DELETE CASCADE,
+                        request_id TEXT NOT NULL, provider TEXT NOT NULL,
+                        error_kind TEXT);
+                    CREATE INDEX IF NOT EXISTS search_attempts_request ON search_attempts(request_id);
+                    UPDATE metadata SET value='22' WHERE key='schema_version';
+                    COMMIT;
+                """)

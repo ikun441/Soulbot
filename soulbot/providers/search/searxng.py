@@ -62,6 +62,8 @@ class SearXNGProvider:
                             if response.status_code in {401, 403}
                             else "rate_limit"
                             if response.status_code == 429
+                            else "input"
+                            if response.status_code in {400, 422}
                             else "unavailable"
                         )
                         raise ProviderError(

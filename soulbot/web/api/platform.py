@@ -2,14 +2,14 @@
 
 import asyncio
 
-from fastapi import Depends, HTTPException, UploadFile
+from fastapi import Depends, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import Field
 
 from soulbot.core.personality import system_prompt
 from soulbot.services.backup_service import MAX_BACKUP, BackupService
 from soulbot.services.config_service import Model, Personality
-from soulbot.services.search_service import SearchRequest
+from soulbot.services.search_service import SearchProbe, SearchRequest
 
 PRESETS = {
     "gentle": {
@@ -73,9 +73,46 @@ def install_platform_api(app, s, authorized):
     def openapi():
         return app.openapi()
 
+    async def run_search(data, request, *, only=None):
+        task = asyncio.create_task(
+            s.search.search(data, "connection_test" if only else "explicit", only=only)
+        )
+
+        async def disconnected():
+            while True:
+                await asyncio.sleep(0.25)
+                if await request.is_disconnected():
+                    return
+
+        watcher = asyncio.create_task(disconnected())
+        try:
+            await asyncio.wait({task, watcher}, return_when=asyncio.FIRST_COMPLETED)
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise HTTPException(499, "已取消搜索；已发出的请求可能已产生费用")
+            return await task
+        finally:
+            watcher.cancel()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, watcher, return_exceptions=True)
+
     @app.post("/api/search", dependencies=protected)
-    async def search(data: SearchRequest):
-        return await s.search.search(data)
+    async def search(data: SearchRequest, request: Request):
+        return await run_search(data, request)
+
+    @app.get("/api/search/providers", dependencies=protected)
+    def search_providers():
+        return s.search.provider_status()
+
+    @app.post("/api/search/providers/{name}/test", dependencies=protected)
+    async def search_provider_test(name: str, data: SearchProbe, request: Request):
+        if name not in {"primary", "fallback_1", "fallback_2"}:
+            raise HTTPException(404, "搜索服务不存在")
+        return await run_search(
+            SearchRequest(query="SoulBot 搜索连接测试", limit=1), request, only=name
+        )
 
     @app.get("/api/exploration", dependencies=protected)
     def notes():

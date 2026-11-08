@@ -1,3 +1,4 @@
+import {searchProvidersForm,searchProvidersPanel,bindSearchProviders} from './search-providers.js';
 import {createPageSession} from './page-session.js';
 let session=null;
 const $=s=>document.querySelector(s);
@@ -8,16 +9,17 @@ export async function searchPage(ctx){
  mount(`${heading('SEARCH & EXPLORATION','好奇，从有出处的信息开始。','搜索只返回网页摘要，自主探索只保存在本地，不会自动发给群友。')}
  <form id="editor" class="panel">${toggle('启用网页搜索','search.enabled','使用你配置的 SearXNG 实例；搜索词会发送给该服务。')}
  <div class="form-grid">${field('SearXNG 地址','search.base_url','需在实例 settings.yml 中启用 search.formats 的 json 格式。','url','required')}${field('每次请求费用（元）','search.price_cny_per_request','自建且无 API 费用时填 0；不确定留空，显示未知费用预警。','number','min="0" max="100" step="any" data-nullable="true"')}${field('最多结果数','search.max_results','','number','min="1" max="10" required')}${field('每分钟最多调用','search.max_calls_per_minute','','number','min="1" max="60" required')}${field('每日最多调用','search.max_calls_per_day','','number','min="1" max="1000" required')}</div>
- ${toggle('自主探索公开主题','exploration.enabled','默认关闭，遵守费用、每日额度、夜间免打扰和全局暂停；不访问私人记忆。')}
+ ${searchProvidersForm(ctx)}${toggle('自主探索公开主题','exploration.enabled','默认关闭，遵守费用、每日额度、夜间免打扰和全局暂停；不访问私人记忆。')}
  <div class="form-grid">${field('探索主题','exploration.topics','用逗号或换行分隔，只填公开主题。','text','data-list="true" required')}${field('探索间隔（分钟）','exploration.interval_minutes','每次额外加入随机延迟，重启保留已安排时间。','number','min="10" max="10080" required')}${field('每日探索次数','exploration.max_daily_tasks','','number','min="1" max="20" required')}</div><button class="button primary" id="save">保存搜索规则</button></form>
- <section class="panel media-section"><form id="search-form" data-transient><label for="search-query">搜索公开信息</label><input id="search-query" required maxlength="200" placeholder="例如：天文科普"><div class="actions"><button class="button outline">保存并搜索</button></div></form><p id="search-notice" class="note" aria-live="polite"></p><div id="search-results"></div></section>
+ ${searchProvidersPanel()}<section class="panel media-section"><form id="search-form" data-transient><label for="search-query">搜索公开信息</label><input id="search-query" required maxlength="200" placeholder="例如：天文科普"><div class="actions"><button class="button outline">保存并搜索</button></div></form><p id="search-notice" class="note" aria-live="polite"></p><div id="search-results"></div></section>
  <section class="panel media-section"><h2>本地探索记录</h2><p id="explore-state" class="note"></p><div id="explore-notes"></div></section>`);
  const lifecycle=createPageSession($('#search-form'));session=lifecycle;
+ const refreshProviders=await bindSearchProviders(ctx,lifecycle);if(!lifecycle.active())return;
  const resultHTML=items=>items.map(item=>`<article class="release"><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.title||item.url)}</a><p class="memory-text">${esc(item.snippet)}</p></article>`).join('')||'<p class="empty-state">服务没有返回可用的公开结果。</p>';
  async function notes(){const data=await api('/api/exploration');if(!lifecycle.active())return;$('#explore-state').textContent=`${data.paused?'全局自动化已暂停':data.enabled?'自主探索已开启':'自主探索关闭'} · 最近状态：${data.state.status||'尚未执行'}`;$('#explore-notes').innerHTML=data.items.map(item=>`<article class="release"><h3>${esc(item.topic)}</h3>${resultHTML(item.results)}<button class="button quiet small" data-remove="${item.id}">删除记录</button></article>`).join('')||'<p class="empty-state">尚无自主探索记录。</p>';}
- $('#search-form').onsubmit=e=>{e.preventDefault();guarded(()=>lifecycle.run(async()=>{if(!await saveEditor())return;const data=await send('/api/search','POST',{query:$('#search-query').value});if(!lifecycle.active())return;$('#search-notice').textContent=data.notice;$('#search-results').innerHTML=resultHTML(data.items);notice('搜索服务已返回真实结果。');}),e.submitter);};
+ $('#search-form').onsubmit=e=>{e.preventDefault();guarded(()=>lifecycle.run(async signal=>{if(!await saveEditor())return;let data;try{data=await api('/api/search',{method:'POST',body:JSON.stringify({query:$('#search-query').value}),signal});}finally{if(lifecycle.active())await refreshProviders();}if(!lifecycle.active())return;$('#search-notice').textContent=(data.provider_id==='primary'?'主搜索服务返回。':'备用搜索服务已接管。')+data.notice;$('#search-results').innerHTML=resultHTML(data.items);notice('搜索服务已返回真实结果。');}),e.submitter);};
  $('#explore-notes').onclick=e=>{const b=e.target.closest('[data-remove]');if(!b)return;confirmAction('删除这条探索记录？','删除本地资料，不触发外部操作。',async()=>{await send('/api/exploration/'+b.dataset.remove,'DELETE');if(lifecycle.active())await notes();});};
- await notes();lifecycle.repeat(notes,10000);
+ await notes();lifecycle.repeat(()=>Promise.all([notes(),refreshProviders()]),10000);
 }
 
 export async function systemPage(ctx){
