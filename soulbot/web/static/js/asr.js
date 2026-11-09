@@ -1,6 +1,6 @@
-import {voiceRoutesForm,voiceRoutesPanel,voiceRouteTarget,bindVoiceRoutes,voiceRouteName} from './voice-routes.js?v=v2.6.0';
-import {providerRequestErrorText, providerStatusText} from './provider-guidance.js?v=v2.6.0';
-import {createPageSession} from './page-session.js?v=v2.6.0';
+import {voiceRoutesForm,voiceRoutesPanel,voiceRouteTarget,bindVoiceRoutes,voiceRouteName} from './voice-routes.js?v=v2.7.0';
+import {providerRequestErrorText, providerStatusText} from './provider-guidance.js?v=v2.7.0';
+import {createPageSession} from './page-session.js?v=v2.7.0';
 let session=null;
 const $=selector=>document.querySelector(selector);
 export function stopASRUI(){session?.dispose();session=null;}

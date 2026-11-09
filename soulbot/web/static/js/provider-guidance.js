@@ -20,6 +20,9 @@ const guidance = {
  content_filter: ['服务商未返回内容', '调整输入后重试，不能将这次请求视作成功回复。'],
  generation_interrupted: ['模型生成被中断', '服务商中止了生成，本轮工具请求未执行；请核对用量后重试。'],
  invalid_response: ['服务返回内容不兼容', '检查模型和接口类型；确认服务返回符合所选能力的格式。'],
+ invalid_tool_call: ['工具请求格式无效', '本轮工具未执行。检查所选原生/JSON兼容方式，重新验证模型工具能力；不要将错误格式视为成功操作。'],
+ invalid_tool_history: ['工具上下文不完整', '当前请求尚未发送。清理旧对话上下文后重试，或检查插件返回的工具消息。'],
+ tool_capability: ['工具能力验证未通过', '模型需按所选方式请求工具并读取结果；能力开关保持原样，请检查兼容性。'],
  format: ['返回格式无效', '确认模型支持所选音频或图片格式，再检查服务端响应设置。'],
  size: ['响应超过本地限制', '降低输出尺寸或时长后重试；服务端可能已生成并计费。'],
  url_only: ['服务只返回远程图片地址', '切换到支持 Base64 图片返回的模型；本地没有下载该地址。'],
@@ -36,7 +39,7 @@ const guidance = {
 };
 
 const mayHaveCharged = new Set([
- 'output_limit', 'content_filter', 'generation_interrupted', 'timeout', 'cancelled', 'network', 'unavailable', 'internal', 'invalid_response', 'format', 'size', 'url_only', 'invalid',
+ 'output_limit', 'content_filter', 'generation_interrupted', 'timeout', 'cancelled', 'network', 'unavailable', 'internal', 'invalid_response', 'invalid_tool_call', 'tool_capability', 'format', 'size', 'url_only', 'invalid',
 ]);
 
 export function providerErrorText(

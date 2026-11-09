@@ -12,7 +12,7 @@
 
 | 方法与路径 | 请求 |
 | --- | --- |
-| POST /api/llm/tools-test | 无参数，真实验证主模型原生函数调用，成功后启用 supports_tools；计入预算 |
+| POST /api/llm/tools-test | 无参数，按 tool_calling_mode 验证主模型，成功后启用 supports_tools；JSON兼容模式两次只读调用并校验结果读取，计入预算 |
 | POST /api/qq/retry-last | `{"confirm":true,"source_id":123}`，仅当前主人已有且未过期的私聊；省略 source_id 取最近请求，同条请求最多重试一次 |
 | POST /api/image/comfyui/probe | ComfySettings；只读返回本地实际版本、checkpoint、sampler 和 scheduler |
 | POST /api/search | `{"query":"公开天文科普","limit":5}` |
@@ -344,3 +344,13 @@ GET `/api/image/status` 新增routes，POST `/api/image/generate` 在prompt之�
 自动空间生图沿用路由并复核策略，租约覆盖整条路由的最大时长；模型工具说明考虑启用的ComfyUI候选语言配置，不在服务端擅自改写或翻译用户手动提示词。
 
 SQLite v24重建media_attempts的能力约束，纳入image_generation并保留原tts/asr行、主键和请求索引。备份合并新旧尝试与用量，不退回费用/额度。ComfyUI取消只向/queue提交本任务ID删除，不调用全局/interrupt；已运行或未知ID任务不保证被取消，不会宣称服务端已停止。
+
+
+## v2.7.0 非原生工具兼容
+
+- `llm.tool_calling_mode` 及 `llm.fallbacks.fallback_1/2.tool_calling_mode` 为 `native`（默认）或 `json`；`supports_tools` 仍是能力开关。不会根据400响应自动改模式或自动开启工具。备用端点独立选择。
+- `POST /api/llm/tools-test` 无参数，返回 `ok/message/model/mode`。原生验证保留单次只读调用；JSON模式先验证 `capability_probe(word=ok)`，再转交随机只读结果并核验最终文本；配置或密钥变化、无效格式或结果不符不启用。
+- JSON模式仅在本次提供工具时注入服务端协议和工具Schema，使用普通Chat Completions消息，不发送 `tools/tool_choice/response_format`。协议为完整对象 `{"type":"tool_calls","calls":[{"name":"工具名","arguments":{}}]}` 或 `{"type":"final","text":"回复"}`；不接受围栏或前后说明。整个提案先校验，最多5个不重复调用，参数最多16384字符，工具名必须在本轮清单且符合其JSON Schema。
+- 工具结果转交为用户消息中的 `type=tool_result` 数据，包含服务端call_id、名称、对应参数及内容，明确标为数据而非授权；同一工具多个请求也可对应到各自参数。模型无法指定调用ID、伪造审批或绕过ToolRegistry。原有每任务4轮/5次限制和权限复核继续执行；普通聊天JSON不触发工具。
+- 兼容工具流式请求会缓冲至结束，验证后只显示最终文字，错误和取消不输出半截协议或执行不完整提案。`invalid_tool_call` 保留实际用量/可能费用；`invalid_tool_history` 在发出请求前拒绝。上下文和无真实用量时的预留包含完整协议。
+- JSON模式是SoulBot自身的文本协议适配，不是原生能力或通用遵循保证。现有Chat Completions传输字段参照[DeepSeek官方接口说明](https://api-docs.deepseek.com/api/create-chat-completion/)，不硬编码模型列表。

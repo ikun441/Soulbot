@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 import httpx
 
 from soulbot.providers.llm.base import Completion, ProviderError, Usage, has_images
+from soulbot.providers.llm.prompt_tools import decode_result, prepare_messages
 
 MAX_BODY = 2 * 1024 * 1024
 
@@ -180,13 +181,14 @@ class OpenAICompatibleProvider:
         on_delta: Callable[[str], Awaitable[None]] | None = None,
     ):
         streaming = self.settings.streaming
+        compatible_tools = bool(tools and self.settings.tool_calling_mode == "json")
         if tools and not self.settings.supports_tools:
             raise ProviderError("unsupported_capability", "此 Provider 未声明工具调用能力")
         if has_images(messages) and not self.settings.supports_vision:
             raise ProviderError("unsupported_capability", "此 Provider 未声明图片理解能力")
         payload = {
             "model": self.settings.model,
-            "messages": messages,
+            "messages": prepare_messages(messages, tools, self.settings.tool_calling_mode),
             self.settings.max_output_field: maximum,
             "stream": streaming,
         }
@@ -194,7 +196,7 @@ class OpenAICompatibleProvider:
             payload["reasoning_effort"] = self.settings.reasoning_effort
         if streaming and self.settings.stream_usage:
             payload["stream_options"] = {"include_usage": True}
-        if tools:
+        if tools and not compatible_tools:
             payload.update(tools=tools, tool_choice="auto")
         try:
             async with asyncio.timeout(self.settings.timeout_seconds):
@@ -205,7 +207,14 @@ class OpenAICompatibleProvider:
                         if response.status_code != 200:
                             raise self.error(response.status_code)
                         if streaming:
-                            return await self.stream(response, on_delta)
+                            result = await self.stream(
+                                response, None if compatible_tools else on_delta
+                            )
+                            if compatible_tools:
+                                result = decode_result(result, tools)
+                                if on_delta and result.text:
+                                    await on_delta(result.text)
+                            return result
                         value = json.loads(await self.read_body(response))
                         choice = value["choices"][0]
                         message = choice["message"]
@@ -217,15 +226,18 @@ class OpenAICompatibleProvider:
                         calls = parse_calls(message.get("tool_calls"))
                         if not text and not calls and not message.get("refusal"):
                             raise ValueError
-                        if on_delta and text:
-                            await on_delta(text)
-                        return Completion(
+                        result = Completion(
                             text,
                             usage,
                             calls,
                             model=self.settings.model,
                             finish_reason=choice.get("finish_reason"),
                         )
+                        if compatible_tools:
+                            result = decode_result(result, tools)
+                        if on_delta and result.text:
+                            await on_delta(result.text)
+                        return result
         except (httpx.TimeoutException, TimeoutError):
             raise ProviderError(
                 "timeout", "模型响应超时，本次消耗将保守记账", retryable=True, uncertain=True

@@ -1,7 +1,7 @@
-import {resultCard} from './media.js?v=v2.6.0';
-import {providerRequestErrorText} from './provider-guidance.js?v=v2.6.0';
-import {createPageSession} from './page-session.js?v=v2.6.0';
-import {imageRoutesForm,imageRoutesPanel,imageRouteTarget,bindImageRoutes,imageRouteName} from './image-routes.js?v=v2.6.0';
+import {resultCard} from './media.js?v=v2.7.0';
+import {providerRequestErrorText} from './provider-guidance.js?v=v2.7.0';
+import {createPageSession} from './page-session.js?v=v2.7.0';
+import {imageRoutesForm,imageRoutesPanel,imageRouteTarget,bindImageRoutes,imageRouteName} from './image-routes.js?v=v2.7.0';
 let session=null;
 const $=selector=>document.querySelector(selector);
 export function stopImageUI(){session?.dispose();session=null;}

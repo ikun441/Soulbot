@@ -9,6 +9,7 @@ from soulbot.providers.llm.base import (
     trim_context,
 )
 from soulbot.providers.llm.openai_compatible import OpenAICompatibleProvider
+from soulbot.providers.llm.prompt_tools import fit_messages
 from soulbot.services.provider_diagnostics import ProviderDiagnostics
 
 
@@ -147,6 +148,51 @@ class LLMService:
                 "tool_capability", "模型未返回有效工具调用；能力开关保持原样，请检查模型兼容性"
             )
 
+        mode = snapshot.llm.tool_calling_mode
+        if mode == "json":
+            from uuid import uuid4
+
+            current, current_credentials = self.test_inputs()
+            if current != original or current_credentials != credentials:
+                raise ProviderError("config_changed", "测试期间模型配置发生变化，已停止后续验证")
+            nonce = uuid4().hex[:16]
+            followup = await probe.complete(
+                [
+                    {
+                        "role": "system",
+                        "content": "只读能力测试。读取工具结果，最终回复必须且只能是其中的value字符串，不要再调用工具。",
+                    },
+                    {"role": "user", "content": "调用capability_probe后返回它提供的value"},
+                    {"role": "assistant", "content": None, "tool_calls": result.tool_calls},
+                    {
+                        "role": "tool",
+                        "tool_call_id": result.tool_calls[0]["id"],
+                        "content": json.dumps({"value": nonce}),
+                    },
+                ],
+                purpose="admin_capability_test",
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "capability_probe",
+                            "description": "只读测试",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"word": {"type": "string"}},
+                                "required": ["word"],
+                                "additionalProperties": False,
+                            },
+                        },
+                    }
+                ],
+                output_limit=512,
+            )
+            if followup.tool_calls or followup.text != nonce:
+                raise ProviderError(
+                    "tool_capability", "模型未正确读取兼容工具结果，能力开关保持原样"
+                )
+
         def apply():
             with self.config.lock:
                 current, current_credentials = self.test_inputs()
@@ -162,8 +208,13 @@ class LLMService:
         await asyncio.to_thread(apply)
         return {
             "ok": True,
-            "message": "已验证真实工具调用并启用主模型工具能力；本次测试计入预算",
+            "message": (
+                "已验证JSON兼容工具请求及结果读取，并启用主模型工具能力；两次请求计入预算"
+                if mode == "json"
+                else "已验证真实工具调用并启用主模型工具能力；本次测试计入预算"
+            ),
             "model": result.model,
+            "mode": mode,
         }
 
     async def models(self, name="primary"):
@@ -375,14 +426,7 @@ class LLMService:
                     settings.limits.max_output_per_request,
                     endpoint.context_window // 2,
                 )
-                prepared = trim_context(
-                    messages,
-                    (endpoint.context_window - maximum - 128)
-                    - (estimate_tokens([{"tools": tools}]) if tools else 0),
-                )
-                amount = estimate_tokens(prepared) + (
-                    estimate_tokens([{"tools": tools}]) if tools else 0
-                )
+                prepared, amount = fit_messages(messages, tools, endpoint, maximum)
                 for attempt in range(endpoint.retries + 1):
                     key = await asyncio.to_thread(
                         self.budget.reserve,

@@ -1,4 +1,4 @@
-import {providerStatusText} from './provider-guidance.js?v=v2.6.0';
+import {providerStatusText} from './provider-guidance.js?v=v2.7.0';
 export const imageRouteName=id=>({primary:'主服务',fallback_1:'备用服务 1',fallback_2:'备用服务 2'}[id]||'主服务');
 export function imageRoutesForm(ctx){
  const {config,field,toggle,select,secret}=ctx,cfg=config().image_generation;

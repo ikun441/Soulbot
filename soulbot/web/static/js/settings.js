@@ -1,5 +1,5 @@
-import {frequencyFields} from './frequency-settings.js?v=v2.6.0';
-import {createPageSession} from './page-session.js?v=v2.6.0';
+import {frequencyFields} from './frequency-settings.js?v=v2.7.0';
+import {createPageSession} from './page-session.js?v=v2.7.0';
 let session=null;
 const $=s=>document.querySelector(s);
 export function stopSettingsUI(){session?.dispose();session=null;}

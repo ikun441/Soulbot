@@ -13,9 +13,7 @@ from soulbot.core.personality import system_prompt
 from soulbot.providers.llm.base import (
     Completion,
     ProviderError,
-    estimate_tokens,
     has_images,
-    trim_context,
 )
 
 
@@ -516,22 +514,25 @@ class SoulBotAgent:
             discovery["function"]["parameters"]["properties"]["names"]["items"]["enum"] = names
 
         def fits(candidate):
+            from soulbot.providers.llm.prompt_tools import fit_messages
+
             cfg = self.config.current
             endpoints = [cfg.llm, *cfg.llm.fallbacks.values()]
-            windows = [
-                e.context_window
-                - min(cfg.limits.max_output_per_request, e.context_window // 2)
-                - 128
+            eligible = [
+                e
                 for e in endpoints
                 if e.enabled
                 and e.supports_tools
                 and (not has_images(messages) or e.supports_vision)
             ]
-            maximum = min(windows or [cfg.llm.context_window]) - estimate_tokens(
-                [{"tools": candidate}]
-            )
             try:
-                trim_context(messages, maximum)
+                for endpoint in eligible or [cfg.llm]:
+                    fit_messages(
+                        messages,
+                        candidate,
+                        endpoint,
+                        min(cfg.limits.max_output_per_request, endpoint.context_window // 2),
+                    )
                 return True
             except ProviderError:
                 return False

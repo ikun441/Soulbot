@@ -110,6 +110,7 @@ class LLMEndpoint(Model):
     context_window: int = Field(default=16384, ge=1024, le=2000000)
     streaming: bool = False
     supports_tools: bool = False
+    tool_calling_mode: Literal["native", "json"] = "native"
     supports_vision: bool = False
     reasoning_effort: Literal[
         "provider", "none", "minimal", "low", "medium", "high", "xhigh", "max"

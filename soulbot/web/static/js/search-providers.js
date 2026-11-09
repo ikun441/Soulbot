@@ -1,4 +1,4 @@
-import {providerStatusText} from './provider-guidance.js?v=v2.6.0';
+import {providerStatusText} from './provider-guidance.js?v=v2.7.0';
 const labels={primary:'主搜索服务',fallback_1:'备用搜索服务 1',fallback_2:'备用搜索服务 2'};
 export function searchProvidersForm(ctx){
  const {config,field,toggle}=ctx;
