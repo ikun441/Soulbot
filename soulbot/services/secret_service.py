@@ -12,7 +12,11 @@ NAMES = {
     "llm_fallback_1": "SOULBOT_LLM_FALLBACK_1",
     "llm_fallback_2": "SOULBOT_LLM_FALLBACK_2",
     "tts_api_key": "SOULBOT_TTS_API_KEY",
+    "tts_fallback_1": "SOULBOT_TTS_FALLBACK_1",
+    "tts_fallback_2": "SOULBOT_TTS_FALLBACK_2",
     "asr_api_key": "SOULBOT_ASR_API_KEY",
+    "asr_fallback_1": "SOULBOT_ASR_FALLBACK_1",
+    "asr_fallback_2": "SOULBOT_ASR_FALLBACK_2",
     "image_api_key": "SOULBOT_IMAGE_API_KEY",
 }
 

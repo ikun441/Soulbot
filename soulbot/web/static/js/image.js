@@ -1,5 +1,5 @@
-import {resultCard} from './media.js';
-import {providerRequestErrorText, providerStatusText} from './provider-guidance.js';
+import {resultCard} from './media.js?v=v2.5.0';
+import {providerRequestErrorText, providerStatusText} from './provider-guidance.js?v=v2.5.0';
 let controller=null;
 const $=selector=>document.querySelector(selector);
 export function stopImageUI(){controller?.abort();controller=null;}

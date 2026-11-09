@@ -24,6 +24,7 @@ class AudioPayload:
     sample_rate: int
     channels: int
     duration: float
+    provider_id: str = "primary"
 
 
 def inspect_audio(content):

@@ -165,7 +165,7 @@ class BudgetService:
             speech = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT id,provider,model,purpose,status,chars,cost_cny,created_at,error_kind FROM tts_usage ORDER BY created_at DESC LIMIT 50"
+                    "SELECT u.*,COALESCE(a.route_id,'primary') AS route_id,a.request_id FROM tts_usage u LEFT JOIN media_attempts a ON a.usage_id=u.id AND a.capability='tts' ORDER BY u.created_at DESC,u.rowid DESC LIMIT 50"
                 )
             ]
             today = db.execute(
@@ -181,7 +181,7 @@ class BudgetService:
             recognition = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT id,provider,model,purpose,status,seconds,cost_cny,created_at,error_kind FROM asr_usage ORDER BY created_at DESC LIMIT 50"
+                    "SELECT u.*,COALESCE(a.route_id,'primary') AS route_id,a.request_id FROM asr_usage u LEFT JOIN media_attempts a ON a.usage_id=u.id AND a.capability='asr' ORDER BY u.created_at DESC,u.rowid DESC LIMIT 50"
                 )
             ]
             asr_today = db.execute(

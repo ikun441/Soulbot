@@ -10,12 +10,13 @@ from soulbot.services.audio_service import MAX_AUDIO_BYTES, inspect_audio
 class OpenAICompatibleTTSProvider:
     capabilities = frozenset({"tts"})
 
-    def __init__(self, secrets):
+    def __init__(self, secrets, secret_name="tts_api_key"):
         self.secrets, self.transport, self.last_success = secrets, None, 0
+        self.secret_name = secret_name
 
     async def synthesize(self, text, settings):
         endpoint = settings.compatible
-        key = self.secrets.get("tts_api_key")
+        key = self.secrets.get(self.secret_name)
         if not key or not endpoint.model or not endpoint.voice:
             raise SpeechError("not_configured", "请先配置语音服务的独立 Key、模型和音色")
         body = {

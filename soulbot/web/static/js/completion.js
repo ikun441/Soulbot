@@ -1,5 +1,5 @@
-import {searchProvidersForm,searchProvidersPanel,bindSearchProviders} from './search-providers.js';
-import {createPageSession} from './page-session.js';
+import {searchProvidersForm,searchProvidersPanel,bindSearchProviders} from './search-providers.js?v=v2.5.0';
+import {createPageSession} from './page-session.js?v=v2.5.0';
 let session=null;
 const $=s=>document.querySelector(s);
 export function stopCompletionUI(){session?.dispose();session=null;}

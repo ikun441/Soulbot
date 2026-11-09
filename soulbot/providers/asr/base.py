@@ -17,6 +17,8 @@ class Transcription:
     text: str
     language: str | None
     duration: float
+    provider_id: str = "primary"
+    provider: str = ""
 
 
 class ASRProvider(Protocol):

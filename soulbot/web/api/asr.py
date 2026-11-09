@@ -2,7 +2,7 @@ import asyncio
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import Depends, HTTPException, Request, UploadFile
+from fastapi import Depends, HTTPException, Query, Request, UploadFile
 
 from soulbot.services.audio_service import MAX_AUDIO_BYTES
 from soulbot.services.config_service import Model
@@ -23,6 +23,7 @@ def install_asr_api(app, s, authorized):
             "qq_enabled": s.config.current.asr.qq_enabled,
             "configured": s.recognition.configured(),
             "provider_test": s.recognition.test_status(),
+            "routes": s.recognition.router.status(),
             "provider": s.config.current.asr.provider,
             "local_ready": local.ready(),
             "preparing": bool(local.task and not local.task.done()),
@@ -42,12 +43,18 @@ def install_asr_api(app, s, authorized):
         return await status()
 
     @app.post("/api/asr/transcribe", dependencies=protected)
-    async def transcribe(request: Request, file: UploadFile):
+    async def transcribe(
+        request: Request,
+        file: UploadFile,
+        provider_id: Literal["auto", "primary", "fallback_1", "fallback_2"] = Query(default="auto"),
+    ):
         try:
             content = await file.read(MAX_AUDIO_BYTES + 1)
         finally:
             await file.close()
-        task = asyncio.create_task(s.recognition.transcribe(content))
+        task = asyncio.create_task(
+            s.recognition.transcribe(content, only=None if provider_id == "auto" else provider_id)
+        )
 
         async def disconnected():
             while True:

@@ -1,5 +1,5 @@
-import {createPluginAdminUI} from './plugin-admin.js';
-import {createPageSession} from './page-session.js';
+import {createPluginAdminUI} from './plugin-admin.js?v=v2.5.0';
+import {createPageSession} from './page-session.js?v=v2.5.0';
 let session=null;
 const $=s=>document.querySelector(s);
 export function stopPluginsUI(){session?.dispose();session=null;}

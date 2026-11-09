@@ -304,7 +304,7 @@ class BackupService:
                             "SELECT value FROM metadata WHERE key='schema_version'"
                         ).fetchone()[0]
                     )
-                    if not 1 <= version <= 22:
+                    if not 1 <= version <= 23:
                         raise ValueError
                     columns = {r[1] for r in db.execute("PRAGMA table_info(proactive_jobs)")}
                     if "attachments_json" in columns:
@@ -385,6 +385,7 @@ class BackupService:
                 "image_usage",
                 "search_usage",
                 "search_attempts",
+                "media_attempts",
                 "proactive_usage",
                 "qzone_attempts",
                 "group_state",

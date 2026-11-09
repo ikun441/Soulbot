@@ -307,3 +307,25 @@ WebUI离开搜索页面会中止等待；服务端检测断开后取消当前任
 SQLite v22追加search_attempts(usage_id/request_id/provider/error_kind)，与原search_usage逐项关联。search_usage保持原6列以兼容旧数据；旧记录在查询中显示primary。分钟/每日搜索上限按实际尝试计数，探索每日任务按request_id去重，备用请求不重复占探索任务数。备份恢复合并新增明细及原用量，不能通过恢复退回费用或调用额度。`/api/usage` 中search.recent新增provider/request_id/error_kind。
 
 接口契约依据：[SearXNG 官方 Search API](https://docs.searxng.org/dev/search_api.html)，使用GET /search及q/format=json/safesearch参数，结果只作为不可信资料，不下载结果链接。
+
+
+## v2.5.0 TTS/ASR 备用路由
+
+`tts.fallbacks` 与 `asr.fallbacks` 分别支持 fallback_1/fallback_2。每项有 enabled、provider、timeout_seconds 及对应服务字段，默认空。TTS支持edge或openai_compatible，edge及compatible配置与主服务同结构；ASR支持local或openai_compatible，base_url/model/language/price_cny_per_minute与主服务同结构。拒绝同一能力内重复的启用端点，TTS允许同服务的不同音色；ASR不重复使用同一本地模型。
+
+`tts.total_timeout_seconds` 默认90（5–240秒），`asr.total_timeout_seconds` 默认180（5–360秒）；每次尝试受独立timeout和剩余总时长共同约束，工具/调用方更短的超时仍优先。输入不合法、输出大小/时长超限、取消、配置/密钥变化、权限关闭和全局暂停自动任务时不切换；已有合法音频或ASR空结果即停止。缺少配置/本地未准备的服务不会预留调用额度；实际失败与备用调用分别记账。
+
+备用独立密钥名为 tts_fallback_1/tts_fallback_2/asr_fallback_1/asr_fallback_2，环境变量为 SOULBOT_TTS_FALLBACK_1/2、SOULBOT_ASR_FALLBACK_1/2。与原密钥使用同一受保护写入API、读取配置仅返回是否已配置，导出默认脱敏。不会复用主服务、聊天或其他类型密钥。
+
+`asr.allow_cloud_fallback` 默认false，启用任一云端备用前须显式设true。关闭授权时WebUI同时取消云端备用启用项；本地失败本身不构成上传授权。主服务主动选择云端与此备用授权分别管理。已发送请求无法撤回，取消后可能已上传/计费。本地备用不自动下载模型。
+
+GET `/api/tts/status`、`/api/asr/status` 新增 routes 数组，含 id/provider/state/last_test_at/last_error_kind；现有provider_test表示整条路由最近结果，端点或密钥改变使匹配状态失效。TTS POST `/api/tts/synthesize` 新增可选provider_id：auto（默认）、primary、fallback_1、fallback_2。ASR POST `/api/asr/transcribe` 用同名查询参数。指定单个服务只测试该服务，不自动切换；服务需已启用并配置。
+
+TTS返回产物新增provider_id，ASR转写结果新增provider_id及实际provider（local/openai_compatible）；文本/录音及转写结果不进入路由账本。GET `/api/tts/voices?provider_id=primary|fallback_1|fallback_2` 可只读查询对应Edge音色，已保存但未启用的备用也可查询；兼容接口不虚构音色列表。
+
+SQLite v23追加media_attempts(usage_id/request_id/capability/route_id)，原tts_usage/asr_usage列布局保持兼容，`/api/usage` 对应recent新增route_id/request_id，旧条目视为primary。完整备份合并新增明细和费用/频率，不通过恢复退回已消耗额度。每个实际尝试计次及字符/录音秒数，未知费用不显示零，已派发失败/取消按错误可确认程度结算。
+
+
+### 原生页面资源版本
+
+页面入口、CSS/Logo及ES Module依赖URL带当前版本参数。发布时先运行 `scripts/web_assets.py` 同步，`scripts/release_check.py` 会检查所有版本参数，避免只更新入口而保留旧子模块。根页面与/static/响应使用Cache-Control:no-cache，允许ETag条件验证；私人API继续no-store，CSP仍限制同源脚本。升级后刷新页面即可加载新模块，已打开旧页面需刷新后再使用新字段。

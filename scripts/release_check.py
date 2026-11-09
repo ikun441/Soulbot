@@ -8,10 +8,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from scripts.web_assets import sync as sync_web_assets  # noqa: E402
 from soulbot import VERSION, __version__  # noqa: E402
 
 
 def main():
+    sync_web_assets(check=True)
     assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", VERSION)
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert metadata["tool"]["setuptools"]["dynamic"]["version"]["attr"] == "soulbot.__version__"

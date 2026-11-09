@@ -78,7 +78,11 @@ class SecretUpdate(Model):
     llm_fallback_1: SecretStr | None = None
     llm_fallback_2: SecretStr | None = None
     tts_api_key: SecretStr | None = None
+    tts_fallback_1: SecretStr | None = None
+    tts_fallback_2: SecretStr | None = None
     asr_api_key: SecretStr | None = None
+    asr_fallback_1: SecretStr | None = None
+    asr_fallback_2: SecretStr | None = None
     image_api_key: SecretStr | None = None
 
 
@@ -317,6 +321,8 @@ def create_web_app(root: Path, services=None):
         )
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     @app.exception_handler(ProviderError)

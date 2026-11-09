@@ -386,37 +386,88 @@ class CompatibleSpeechSettings(Model):
         return self
 
 
-class SpeechSettings(Model):
+class SpeechEndpoint(Model):
     enabled: bool = False
     provider: Literal["edge", "openai_compatible"] = "edge"
     edge: EdgeSpeechSettings = Field(default_factory=EdgeSpeechSettings)
     compatible: CompatibleSpeechSettings = Field(default_factory=CompatibleSpeechSettings)
     timeout_seconds: float = Field(default=40, ge=5, le=120, allow_inf_nan=False)
+
+
+class SpeechSettings(SpeechEndpoint):
+    fallbacks: dict[str, SpeechEndpoint] = Field(default_factory=dict, max_length=2)
+    total_timeout_seconds: float = Field(default=90, ge=5, le=240, allow_inf_nan=False)
     max_text_chars: int = Field(default=500, ge=10, le=2000)
     max_duration_seconds: int = Field(default=120, ge=10, le=180)
     max_calls_per_minute: int = Field(default=3, ge=1, le=20)
     max_calls_per_day: int = Field(default=50, ge=1, le=1000)
     max_chars_per_day: int = Field(default=10000, ge=100, le=1000000)
 
+    @model_validator(mode="after")
+    def valid_routes(self):
+        validate_media_routes(self, "tts")
+        return self
 
-class ASRSettings(Model):
+
+class ASREndpoint(Model):
     enabled: bool = False
-    qq_enabled: bool = False
     provider: Literal["local", "openai_compatible"] = "local"
     base_url: str = "https://api.openai.com/v1"
     model: str = Field(default="", max_length=120)
     language: str = Field(default="zh", pattern=r"^([a-z]{2})?$")
     timeout_seconds: float = Field(default=90, ge=5, le=180, allow_inf_nan=False)
-    max_duration_seconds: float = Field(default=60, ge=1, le=180, allow_inf_nan=False)
-    max_calls_per_minute: int = Field(default=3, ge=1, le=20)
-    max_calls_per_day: int = Field(default=50, ge=1, le=1000)
-    max_seconds_per_day: int = Field(default=1800, ge=60, le=86400)
     price_cny_per_minute: float | None = Field(default=None, ge=0, le=1000, allow_inf_nan=False)
 
     @field_validator("base_url")
     @classmethod
     def valid_url(cls, value):
         return LLMEndpoint.valid_url(value)
+
+
+class ASRSettings(ASREndpoint):
+    qq_enabled: bool = False
+    fallbacks: dict[str, ASREndpoint] = Field(default_factory=dict, max_length=2)
+    total_timeout_seconds: float = Field(default=180, ge=5, le=360, allow_inf_nan=False)
+    allow_cloud_fallback: bool = False
+    max_duration_seconds: float = Field(default=60, ge=1, le=180, allow_inf_nan=False)
+    max_calls_per_minute: int = Field(default=3, ge=1, le=20)
+    max_calls_per_day: int = Field(default=50, ge=1, le=1000)
+    max_seconds_per_day: int = Field(default=1800, ge=60, le=86400)
+
+    @model_validator(mode="after")
+    def valid_routes(self):
+        validate_media_routes(self, "asr")
+        if not self.allow_cloud_fallback and any(
+            p.enabled and p.provider == "openai_compatible" for p in self.fallbacks.values()
+        ):
+            raise ValueError("启用云端备用识别前，请明确允许向备用云端服务上传录音")
+        return self
+
+
+def validate_media_routes(policy, capability):
+    from urllib.parse import urlsplit
+
+    if not policy.fallbacks.keys() <= {"fallback_1", "fallback_2"}:
+        raise ValueError("备用服务只能使用 fallback_1 与 fallback_2")
+    seen = set()
+    for p in [policy, *(item for item in policy.fallbacks.values() if item.enabled)]:
+        if p.provider == "openai_compatible":
+            endpoint = p.compatible if capability == "tts" else p
+            url = urlsplit(endpoint.base_url)
+            key = (
+                p.provider,
+                url.scheme,
+                url.hostname.lower(),
+                url.port or (443 if url.scheme == "https" else 80),
+                url.path.rstrip("/"),
+                endpoint.model,
+                endpoint.voice if capability == "tts" else "",
+            )
+        else:
+            key = (p.provider, p.edge.voice if capability == "tts" else "local")
+        if key in seen:
+            raise ValueError("已启用的备用服务不能重复主服务或其他备用服务")
+        seen.add(key)
 
 
 class ComfySettings(Model):

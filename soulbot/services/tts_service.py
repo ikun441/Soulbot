@@ -7,6 +7,7 @@ import uuid
 from soulbot.providers.tts.base import SpeechError
 from soulbot.providers.tts.edge import EdgeTTSProvider
 from soulbot.providers.tts.openai_compatible import OpenAICompatibleTTSProvider
+from soulbot.services.media_routing import MediaRouter
 
 
 class TTSService:
@@ -16,15 +17,15 @@ class TTSService:
         registry.register("tts", "openai_compatible", OpenAICompatibleTTSProvider(secrets))
         self.secrets = secrets
         self.diagnostics = diagnostics
+        self.router = MediaRouter(self, "tts", SpeechError)
+        for name in ("fallback_1", "fallback_2"):
+            registry.register("tts", name, OpenAICompatibleTTSProvider(secrets, "tts_" + name))
         self.jobs = set()
         self.closed = False
 
     def test_inputs(self):
         settings = self.config.current.tts.model_copy(deep=True)
-        secret = (
-            self.secrets.get("tts_api_key") if settings.provider == "openai_compatible" else None
-        )
-        return settings, secret
+        return settings, self.router.credentials(settings)
 
     def test_status(self):
         settings, secret = self.test_inputs()
@@ -40,14 +41,9 @@ class TTSService:
         self.diagnostics.record("tts", settings, secret, ok=ok, error_kind=error_kind)
 
     def configured(self):
-        settings = self.config.current.tts
-        return settings.provider == "edge" or bool(
-            self.secrets.get("tts_api_key")
-            and settings.compatible.model
-            and settings.compatible.voice
-        )
+        return self.router.configured()
 
-    def reserve(self, settings, text, purpose):
+    def reserve(self, settings, text, purpose, *, route=None):
         policy, now = settings.tts, time.time()
         day = self.budget.day(settings)
         price = 0 if policy.provider == "edge" else policy.compatible.price_cny_per_1000_chars
@@ -73,6 +69,7 @@ class TTSService:
                 "INSERT INTO tts_usage VALUES (?,?,?,?,?,'pending',?,?,?,NULL)",
                 (key, day, policy.provider, model, purpose, len(text), cost, now),
             )
+            self.router.reserve_details(db, key, route)
             self.budget.record_warnings(db, settings, day=day)
         return key
 
@@ -82,7 +79,7 @@ class TTSService:
             if status == "rejected":
                 db.execute("UPDATE tts_usage SET cost_cny=0 WHERE id=?", (key,))
 
-    async def synthesize(self, text, purpose="explicit"):
+    async def synthesize(self, text, purpose="explicit", *, only=None):
         settings = self.config.current.model_copy(deep=True)
         policy = settings.tts
         text = text.strip()
@@ -96,43 +93,15 @@ class TTSService:
             raise SpeechError("busy", "语音任务较多，请稍后再试")
         task = asyncio.current_task()
         self.jobs.add(task)
-        key = None
-        secret = self.secrets.get("tts_api_key") if policy.provider == "openai_compatible" else None
-        try:
-            # Synchronous short transaction avoids cancellation leaking a reservation.
-            key = self.reserve(settings, text, purpose)
-            provider = self.registry.resolve("tts", policy.provider)
-            async with asyncio.timeout(policy.timeout_seconds):
-                result = await provider.synthesize(text, policy)
+
+        async def invoke(provider, value, selected):
+            result = await provider.synthesize(value, selected)
             if result.duration > policy.max_duration_seconds:
                 raise SpeechError("duration", "返回语音超过配置的时长上限", uncertain=True)
-            self.record_test(policy, secret, ok=True)
-            self.finish(key, "completed")
             return result
-        except asyncio.CancelledError:
-            if key:
-                self.record_test(policy, secret, ok=False, error_kind="cancelled")
-                self.finish(key, "uncertain", "cancelled")
-            raise
-        except TimeoutError:
-            if key:
-                self.record_test(policy, secret, ok=False, error_kind="timeout")
-                self.finish(key, "uncertain", "timeout")
-            raise SpeechError(
-                "timeout", "语音生成超时；服务商可能已产生费用", uncertain=True
-            ) from None
-        except SpeechError as error:
-            if key:
-                self.record_test(policy, secret, ok=False, error_kind=error.kind)
-                self.finish(key, "uncertain" if error.uncertain else "rejected", error.kind)
-            raise
-        except Exception:
-            if key:
-                self.record_test(policy, secret, ok=False, error_kind="internal")
-                self.finish(key, "uncertain", "internal")
-            raise SpeechError(
-                "internal", "语音生成未完成，请检查服务配置", uncertain=True
-            ) from None
+
+        try:
+            return await self.router.execute(text, settings, purpose, invoke, only=only)
         finally:
             self.jobs.discard(task)
 

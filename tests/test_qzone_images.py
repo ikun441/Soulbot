@@ -132,7 +132,7 @@ def test_schema_twenty_upgrade_preserves_text_draft(s):
         db.execute("UPDATE metadata SET value='20' WHERE key='schema_version'")
     again = Database(s.db.path)
     Database(s.db.path)
-    assert again.get("schema_version") == "22"
+    assert again.get("schema_version") == "23"
     assert s.qzone.get(row["id"])["content"] == row["content"]
     assert s.qzone.get(row["id"])["images"] == []
 

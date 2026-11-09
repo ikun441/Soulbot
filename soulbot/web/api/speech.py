@@ -2,13 +2,17 @@ import asyncio
 import time
 from typing import Literal
 
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, HTTPException, Query, Request, Response
 from pydantic import Field
 
 from soulbot.core.events import ChatEvent
 from soulbot.services.config_service import Model
 from soulbot.services.media_service import MediaError
 from soulbot.tools.media_tools import SynthesizeSpeech
+
+
+class SpeechPreview(SynthesizeSpeech):
+    provider_id: Literal["auto", "primary", "fallback_1", "fallback_2"] = "auto"
 
 
 class SendAudio(Model):
@@ -25,14 +29,23 @@ def install_speech_api(app, s, authorized):
             "enabled": s.config.current.tts.enabled,
             "configured": s.speech.configured(),
             "provider_test": s.speech.test_status(),
+            "routes": s.speech.router.status(),
             "provider": s.config.current.tts.provider,
             "active": len(s.speech.jobs),
             "usage": s.budget.summary(s.config.current)["tts"],
         }
 
     @app.get("/api/tts/voices", dependencies=protected)
-    async def voices():
-        settings = s.config.current.tts
+    async def voices(
+        provider_id: Literal["primary", "fallback_1", "fallback_2"] = Query(default="primary"),
+    ):
+        settings = (
+            s.config.current.tts
+            if provider_id == "primary"
+            else s.config.current.tts.fallbacks.get(provider_id)
+        )
+        if settings is None:
+            raise HTTPException(422, "请先保存此备用服务配置")
         if settings.provider == "edge":
             return {
                 "source": "edge_live",
@@ -45,8 +58,12 @@ def install_speech_api(app, s, authorized):
         }
 
     @app.post("/api/tts/synthesize", dependencies=protected)
-    async def synthesize(data: SynthesizeSpeech, request: Request):
-        task = asyncio.create_task(s.speech.synthesize(data.text))
+    async def synthesize(data: SpeechPreview, request: Request):
+        task = asyncio.create_task(
+            s.speech.synthesize(
+                data.text, "web_test", only=None if data.provider_id == "auto" else data.provider_id
+            )
+        )
 
         async def disconnected():
             while True:
@@ -63,8 +80,8 @@ def install_speech_api(app, s, authorized):
                 raise HTTPException(499, "已停止等待语音；请在费用页核对可能产生的消耗")
             audio = await task
             item = await asyncio.to_thread(s.audio.save, audio)
-            await asyncio.to_thread(s.db.audit, "tts_generated", s.config.current.tts.provider)
-            return item
+            await asyncio.to_thread(s.db.audit, "tts_generated", audio.provider_id)
+            return {**item, "provider_id": audio.provider_id}
         finally:
             watcher.cancel()
             if not task.done():

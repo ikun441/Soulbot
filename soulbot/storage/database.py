@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 22:
+            if version > 23:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -489,5 +489,17 @@ class Database:
                         error_kind TEXT);
                     CREATE INDEX IF NOT EXISTS search_attempts_request ON search_attempts(request_id);
                     UPDATE metadata SET value='22' WHERE key='schema_version';
+                    COMMIT;
+                """)
+
+            if version < 23:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS media_attempts (
+                        usage_id TEXT PRIMARY KEY, request_id TEXT NOT NULL,
+                        capability TEXT NOT NULL CHECK(capability IN ('tts','asr')),
+                        route_id TEXT NOT NULL);
+                    CREATE INDEX IF NOT EXISTS media_attempts_request ON media_attempts(request_id);
+                    UPDATE metadata SET value='23' WHERE key='schema_version';
                     COMMIT;
                 """)

@@ -331,7 +331,7 @@ def test_schema_twenty_one_upgrade_preserves_legacy_usage_and_empty_fallbacks(s)
         db.execute("UPDATE metadata SET value='21' WHERE key='schema_version'")
     again = Database(s.db.path)
     Database(s.db.path)
-    assert again.get("schema_version") == "22"
+    assert again.get("schema_version") == "23"
     assert rows(s)[0]["cost_cny"] == 0.8
     assert s.search.provider_status()["attempts"][0]["provider"] == "primary"
     assert Settings.model_validate({"search": {"enabled": True}}).search.fallbacks == {}

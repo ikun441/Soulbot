@@ -10,11 +10,12 @@ from soulbot.providers.asr.base import ASRError, Transcription
 class OpenAICompatibleASRProvider:
     capabilities = frozenset({"asr"})
 
-    def __init__(self, secrets):
+    def __init__(self, secrets, secret_name="asr_api_key"):
         self.secrets, self.transport, self.last_success = secrets, None, 0
+        self.secret_name = secret_name
 
     async def transcribe(self, audio, settings):
-        key = self.secrets.get("asr_api_key")
+        key = self.secrets.get(self.secret_name)
         if not key or not settings.model.strip():
             raise ASRError("configuration", "请配置独立 ASR Key 与识别模型")
         fields = {"model": settings.model, "response_format": "json"}
