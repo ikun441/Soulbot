@@ -1,17 +1,16 @@
 import asyncio
-import hashlib
-import json
 import time
 import uuid
-from datetime import datetime, timezone
 
 from soulbot.providers.image.base import ImageGenerationError
 from soulbot.providers.image.comfyui import ComfyUIProvider
 from soulbot.providers.image.openai_compatible import OpenAICompatibleImageProvider
+from soulbot.services.media_routing import MediaRouter
+from soulbot.services.provider_diagnostics import ProviderDiagnostics
 
 
 class ImageGenerationService:
-    def __init__(self, config, secrets, registry, budget, db):
+    def __init__(self, config, secrets, registry, budget, db, diagnostics=None):
         self.config, self.secrets, self.registry, self.budget, self.db = (
             config,
             secrets,
@@ -27,65 +26,43 @@ class ImageGenerationService:
         )
         registry.register("image_generation", "comfyui", ComfyUIProvider())
         self.jobs, self.closed = set(), False
-        self.last_test = None
-
-    def _provider_fingerprint(self, settings):
-        policy = settings.image_generation
-        value = {
-            "provider": policy.provider,
-            "comfy": policy.comfy.model_dump() if policy.provider == "comfyui" else None,
-            "base_url": policy.base_url,
-            "model": policy.model,
-            "size": policy.size,
-            "quality": policy.quality,
-            "response_format": policy.response_format,
-            "output_format": policy.output_format,
-            # Hash the secret together with the configuration; never return or persist it.
-            "key": self.secrets.get("image_api_key"),
-        }
-        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+        self.health = diagnostics or ProviderDiagnostics()
+        self.router = MediaRouter(self, "image_generation", ImageGenerationError, self.health)
+        for name in ("fallback_1", "fallback_2"):
+            registry.register(
+                "image_generation", name, OpenAICompatibleImageProvider(secrets, "image_" + name)
+            )
 
     def diagnostics(self):
-        settings = self.config.current
-        policy = settings.image_generation
-        configured = self.configured()
-        if not policy.enabled:
-            self.last_test = None
-            state = "disabled"
-        elif not configured:
-            self.last_test = None
-            state = "unconfigured"
-        elif self.last_test is None or self.last_test["fingerprint"] != self._provider_fingerprint(
-            settings
-        ):
-            self.last_test = None
-            state = "not_tested"
-        else:
-            state = "available" if self.last_test["ok"] else "failed"
-        current_test = self.last_test if state in {"available", "failed"} else None
-        return {
-            "state": state,
-            "last_test_at": current_test["tested_at"] if current_test else None,
-            "last_error_kind": current_test["error_kind"] if current_test else None,
-        }
-
-    def _record_test(self, fingerprint, *, ok, error_kind=None):
-        self.last_test = {
-            "fingerprint": fingerprint,
-            "tested_at": datetime.now(timezone.utc).isoformat(),
-            "ok": ok,
-            "error_kind": error_kind,
-        }
-
-    def configured(self):
-        if self.config.current.image_generation.provider == "comfyui":
-            return bool(self.config.current.image_generation.comfy.checkpoint)
-        return bool(
-            self.config.current.image_generation.model.strip() and self.secrets.get("image_api_key")
+        policy = self.config.current.image_generation
+        return self.health.status(
+            "image_generation",
+            policy,
+            self.router.credentials(policy),
+            enabled=policy.enabled,
+            configured=self.configured(),
         )
 
-    def reserve(self, settings, purpose):
+    def record_test(self, policy, credentials, *, ok, error_kind=None):
+        self.health.record("image_generation", policy, credentials, ok=ok, error_kind=error_kind)
+
+    def configured(self):
+        return self.router.configured()
+
+    def max_runtime(self):
+        policy = self.config.current.image_generation
+        return min(
+            policy.total_timeout_seconds,
+            sum(p.timeout_seconds for _, p in self.router.endpoints(policy)),
+        )
+
+    def needs_english(self):
+        return any(
+            p.provider == "comfyui" and p.comfy.tool_prompt_language == "en"
+            for _, p in self.router.endpoints(self.config.current.image_generation)
+        )
+
+    def reserve(self, settings, purpose, *, route=None):
         policy, now = settings.image_generation, time.time()
         day = self.budget.day(settings)
         cost = policy.price_cny_per_image
@@ -112,6 +89,7 @@ class ImageGenerationService:
                     now,
                 ),
             )
+            self.router.reserve_details(db, key, route)
             self.budget.record_warnings(db, settings, day=day)
         return key
 
@@ -123,7 +101,7 @@ class ImageGenerationService:
             if status == "rejected":
                 db.execute("UPDATE image_usage SET cost_cny=0 WHERE id=?", (key,))
 
-    async def generate(self, prompt, purpose="web_test"):
+    async def generate(self, prompt, purpose="web_test", *, only=None):
         settings = self.config.current.model_copy(deep=True)
         policy = settings.image_generation
         prompt = prompt.strip()
@@ -140,39 +118,12 @@ class ImageGenerationService:
             raise ImageGenerationError("busy", "生图任务较多，请稍后再试")
         task = asyncio.current_task()
         self.jobs.add(task)
-        key = None
-        fingerprint = None
+
+        async def invoke(provider, value, selected):
+            return await provider.generate(value, selected)
+
         try:
-            # Reserve synchronously so cancellation cannot lose a billable attempt.
-            key = self.reserve(settings, purpose)
-            fingerprint = self._provider_fingerprint(settings)
-            async with asyncio.timeout(policy.timeout_seconds):
-                result = await self.registry.resolve("image_generation", policy.provider).generate(
-                    prompt, policy
-                )
-            self._record_test(fingerprint, ok=True)
-            self.finish(key, "completed")
-            return result
-        except asyncio.CancelledError:
-            if key:
-                self._record_test(fingerprint, ok=False, error_kind="cancelled")
-                self.finish(key, "uncertain", "cancelled")
-            raise
-        except TimeoutError:
-            if key:
-                self._record_test(fingerprint, ok=False, error_kind="timeout")
-                self.finish(key, "uncertain", "timeout")
-            raise ImageGenerationError("timeout", "生图超时，服务商可能已计费", True) from None
-        except ImageGenerationError as error:
-            if key:
-                self._record_test(fingerprint, ok=False, error_kind=error.kind)
-                self.finish(key, "uncertain" if error.uncertain else "rejected", error.kind)
-            raise
-        except Exception:
-            if key:
-                self._record_test(fingerprint, ok=False, error_kind="internal")
-                self.finish(key, "uncertain", "internal")
-            raise ImageGenerationError("internal", "图片生成未完成，请检查服务配置", True) from None
+            return await self.router.execute(prompt, settings, purpose, invoke, only=only)
         finally:
             self.jobs.discard(task)
 

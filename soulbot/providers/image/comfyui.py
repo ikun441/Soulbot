@@ -62,6 +62,11 @@ class ComfyUIProvider:
                 "samplers": inputs["sampler_name"][0],
                 "schedulers": inputs["scheduler"][0],
             }
+        except ImageGenerationError:
+            # Metadata queries cannot have queued a generation task.
+            raise ImageGenerationError(
+                "configuration", "无法读取本地 ComfyUI 模型和基础节点，尚未提交任务"
+            ) from None
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             raise ImageGenerationError(
                 "configuration",

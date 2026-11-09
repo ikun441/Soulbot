@@ -190,7 +190,7 @@ class BudgetService:
             images = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT id,provider,model,purpose,status,images,cost_cny,created_at,error_kind FROM image_usage ORDER BY created_at DESC LIMIT 50"
+                    "SELECT u.*,COALESCE(a.route_id,'primary') AS route_id,a.request_id FROM image_usage u LEFT JOIN media_attempts a ON a.usage_id=u.id AND a.capability='image_generation' ORDER BY u.created_at DESC,u.rowid DESC LIMIT 50"
                 )
             ]
             image_today = db.execute(

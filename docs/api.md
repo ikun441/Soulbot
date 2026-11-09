@@ -329,3 +329,18 @@ SQLite v23追加media_attempts(usage_id/request_id/capability/route_id)，原tts
 ### 原生页面资源版本
 
 页面入口、CSS/Logo及ES Module依赖URL带当前版本参数。发布时先运行 `scripts/web_assets.py` 同步，`scripts/release_check.py` 会检查所有版本参数，避免只更新入口而保留旧子模块。根页面与/static/响应使用Cache-Control:no-cache，允许ETag条件验证；私人API继续no-store，CSP仍限制同源脚本。升级后刷新页面即可加载新模块，已打开旧页面需刷新后再使用新字段。
+
+
+## v2.6.0 生图备用路由
+
+`image_generation.fallbacks` 支持fallback_1/fallback_2，每项使用原生图端点字段：enabled/provider/comfy/base_url/model/size/quality/response_format/output_format/timeout_seconds/price_cny_per_image。仅支持openai_compatible与comfyui，不接受html_render；拒绝重复的启用地址与模型组合。ComfyUI继续只允许本机回环HTTP、已验证基础节点与固定单张工作流。
+
+备用密钥名image_fallback_1/2，对应环境变量SOULBOT_IMAGE_FALLBACK_1/2；受保护配置写入独立保存、读取只返回是否配置，不复用其他能力或主服务密钥。
+
+`total_timeout_seconds`默认240（5–1200秒），每次尝试同时受该总时限与自身timeout约束；工具调用方更短的超时继续优先。`fallback_on_uncertain`默认false，已提交或费用/结果不确定时停止，开启后才允许继续相应可切换错误，可能重复生成/计费。连接未建立或ComfyUI只读探测失败属于未提交，可直接尝试备用；参数、大小、仅URL返回、取消、限额、权限或配置变化不继续切换。
+
+GET `/api/image/status` 新增routes，POST `/api/image/generate` 在prompt之外接受provider_id=auto（默认）/primary/fallback_1/fallback_2。指定一个服务不自动切换；返回产物包含实际provider_id/provider。POST `/api/image/comfyui/probe` 可传选中备用的ComfySettings读取实际模型/节点，不提交生图。费用记录image_generation.recent新增route_id/request_id。
+
+自动空间生图沿用路由并复核策略，租约覆盖整条路由的最大时长；模型工具说明考虑启用的ComfyUI候选语言配置，不在服务端擅自改写或翻译用户手动提示词。
+
+SQLite v24重建media_attempts的能力约束，纳入image_generation并保留原tts/asr行、主键和请求索引。备份合并新旧尝试与用量，不退回费用/额度。ComfyUI取消只向/queue提交本任务ID删除，不调用全局/interrupt；已运行或未知ID任务不保证被取消，不会宣称服务端已停止。

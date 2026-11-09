@@ -244,7 +244,7 @@ class QZoneService:
                         self.clock(),
                         self.clock()
                         + (
-                            150 + self.s.config.current.image_generation.timeout_seconds
+                            150 + self.s.images.max_runtime()
                             if autonomous and self.s.config.current.qzone.auto_image == "generated"
                             else 120
                         )
@@ -747,7 +747,7 @@ class QZoneService:
                 state = {
                     "lease_until": now
                     + (
-                        max(180, 150 + self.s.config.current.image_generation.timeout_seconds)
+                        max(180, 150 + self.s.images.max_runtime())
                         if self.s.config.current.qzone.auto_image == "generated"
                         else 180
                     ),

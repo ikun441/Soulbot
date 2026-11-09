@@ -56,7 +56,7 @@ class Database:
             version = int(
                 db.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()[0]
             )
-            if version > 23:
+            if version > 24:
                 raise ValueError("数据库来自更高版本，请升级 SoulBot 后再启动")
             if version < 2:
                 db.executescript("""
@@ -501,5 +501,20 @@ class Database:
                         route_id TEXT NOT NULL);
                     CREATE INDEX IF NOT EXISTS media_attempts_request ON media_attempts(request_id);
                     UPDATE metadata SET value='23' WHERE key='schema_version';
+                    COMMIT;
+                """)
+
+            if version < 24:
+                db.executescript("""
+                    BEGIN IMMEDIATE;
+                    ALTER TABLE media_attempts RENAME TO media_attempts_v23;
+                    CREATE TABLE media_attempts (
+                        usage_id TEXT PRIMARY KEY, request_id TEXT NOT NULL,
+                        capability TEXT NOT NULL CHECK(capability IN ('tts','asr','image_generation')),
+                        route_id TEXT NOT NULL);
+                    INSERT INTO media_attempts SELECT * FROM media_attempts_v23;
+                    DROP TABLE media_attempts_v23;
+                    CREATE INDEX media_attempts_request ON media_attempts(request_id);
+                    UPDATE metadata SET value='24' WHERE key='schema_version';
                     COMMIT;
                 """)

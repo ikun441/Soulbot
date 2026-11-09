@@ -517,7 +517,7 @@ class ComfySettings(Model):
         return self
 
 
-class ImageGenerationSettings(Model):
+class ImageGenerationEndpoint(Model):
     provider: Literal["openai_compatible", "comfyui"] = "openai_compatible"
     comfy: ComfySettings = Field(default_factory=ComfySettings)
     enabled: bool = False
@@ -530,9 +530,6 @@ class ImageGenerationSettings(Model):
     response_format: Literal["omit", "b64_json"] = "omit"
     output_format: Literal["omit", "png", "jpeg", "webp"] = "omit"
     timeout_seconds: float = Field(default=120, ge=5, le=600, allow_inf_nan=False)
-    max_prompt_chars: int = Field(default=1000, ge=10, le=4000)
-    max_calls_per_minute: int = Field(default=2, ge=1, le=10)
-    max_images_per_day: int = Field(default=10, ge=1, le=100)
     price_cny_per_image: float | None = Field(default=None, ge=0, le=10000, allow_inf_nan=False)
 
     @field_validator("base_url")
@@ -548,6 +545,39 @@ class ImageGenerationSettings(Model):
             if width * height > 16000000:
                 raise ValueError("请求图片不能超过 1600 万像素")
         return value
+
+
+class ImageGenerationSettings(ImageGenerationEndpoint):
+    max_prompt_chars: int = Field(default=1000, ge=10, le=4000)
+    max_calls_per_minute: int = Field(default=2, ge=1, le=10)
+    max_images_per_day: int = Field(default=10, ge=1, le=100)
+    fallbacks: dict[str, ImageGenerationEndpoint] = Field(default_factory=dict, max_length=2)
+    total_timeout_seconds: float = Field(default=240, ge=5, le=1200, allow_inf_nan=False)
+    fallback_on_uncertain: bool = False
+
+    @model_validator(mode="after")
+    def valid_routes(self):
+        from urllib.parse import urlsplit
+
+        if not self.fallbacks.keys() <= {"fallback_1", "fallback_2"}:
+            raise ValueError("生图备用服务只能使用 fallback_1 与 fallback_2")
+        seen = set()
+        for endpoint in [self, *(p for p in self.fallbacks.values() if p.enabled)]:
+            url = urlsplit(
+                endpoint.comfy.base_url if endpoint.provider == "comfyui" else endpoint.base_url
+            )
+            key = (
+                endpoint.provider,
+                url.scheme,
+                url.hostname.lower(),
+                url.port or (443 if url.scheme == "https" else 80),
+                url.path.rstrip("/"),
+                endpoint.comfy.checkpoint if endpoint.provider == "comfyui" else endpoint.model,
+            )
+            if key in seen:
+                raise ValueError("启用的生图地址与模型不能重复")
+            seen.add(key)
+        return self
 
 
 class EmotionValues(Model):

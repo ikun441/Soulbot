@@ -1,21 +1,21 @@
-import {milestoneSummary,developmentProgress} from './progress.js?v=v2.5.0';
-import {frequencyFields,groupFrequencyForm,readGroupFrequency,fillGroupFrequency} from './frequency-settings.js?v=v2.5.0';
-import {deepseekGuide,optionalSetup,applyOptionalChoices,bindOnboarding} from './onboarding.js?v=v2.5.0';
-import {pluginsPage,stopPluginsUI} from './plugins.js?v=v2.5.0';
-import {bindQuickActions} from './quick-actions.js?v=v2.5.0';
-import {settingsPage,stopSettingsUI} from './settings.js?v=v2.5.0';
-import { changePage, revealPage, moveNav, toast, openDialog, closeDialog, stopMotion, wallpaperFade } from "./motion.js?v=v2.5.0";
-import {imagePage, stopImageUI} from './image.js?v=v2.5.0';
-import {asrPage, stopASRUI} from './asr.js?v=v2.5.0';
-import {speechPage, stopSpeechUI} from './speech.js?v=v2.5.0';
-import {emojiPage, memePage, renderPage, toolsPage, stopMediaUI} from './media.js?v=v2.5.0';
-import {providerErrorText, providerStatusText} from './provider-guidance.js?v=v2.5.0';
-import {emotionPage, relationshipsPage, stopSocialUI} from './social.js?v=v2.5.0';
-import {memoryPage, stopMemoryUI} from './memory.js?v=v2.5.0';
-import {proactivePage, stopProactiveUI} from './proactive.js?v=v2.5.0';
-import {diaryPage, stopDiaryUI} from './diary.js?v=v2.5.0';
-import {qzonePage, stopQZoneUI} from './qzone.js?v=v2.5.0';
-import {searchPage, systemPage, bindPersonality, stopCompletionUI} from './completion.js?v=v2.5.0';
+import {milestoneSummary,developmentProgress} from './progress.js?v=v2.6.0';
+import {frequencyFields,groupFrequencyForm,readGroupFrequency,fillGroupFrequency} from './frequency-settings.js?v=v2.6.0';
+import {deepseekGuide,optionalSetup,applyOptionalChoices,bindOnboarding} from './onboarding.js?v=v2.6.0';
+import {pluginsPage,stopPluginsUI} from './plugins.js?v=v2.6.0';
+import {bindQuickActions} from './quick-actions.js?v=v2.6.0';
+import {settingsPage,stopSettingsUI} from './settings.js?v=v2.6.0';
+import { changePage, revealPage, moveNav, toast, openDialog, closeDialog, stopMotion, wallpaperFade } from "./motion.js?v=v2.6.0";
+import {imagePage, stopImageUI} from './image.js?v=v2.6.0';
+import {asrPage, stopASRUI} from './asr.js?v=v2.6.0';
+import {speechPage, stopSpeechUI} from './speech.js?v=v2.6.0';
+import {emojiPage, memePage, renderPage, toolsPage, stopMediaUI} from './media.js?v=v2.6.0';
+import {providerErrorText, providerStatusText} from './provider-guidance.js?v=v2.6.0';
+import {emotionPage, relationshipsPage, stopSocialUI} from './social.js?v=v2.6.0';
+import {memoryPage, stopMemoryUI} from './memory.js?v=v2.6.0';
+import {proactivePage, stopProactiveUI} from './proactive.js?v=v2.6.0';
+import {diaryPage, stopDiaryUI} from './diary.js?v=v2.6.0';
+import {qzonePage, stopQZoneUI} from './qzone.js?v=v2.6.0';
+import {searchPage, systemPage, bindPersonality, stopCompletionUI} from './completion.js?v=v2.6.0';
 const $ = (selector, node = document) => node.querySelector(selector);
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const paths = {
@@ -134,7 +134,7 @@ function mount(html) {
  }
 }
 function renderLogin() {
- page = 'login'; mount(`${heading('WELCOME BACK','欢迎回到你的小小宇宙。','登录管理员账户，继续照顾 SoulBot 的每一个细节。')}<form class="panel auth-panel" id="login-form"><img class="auth-logo" src="/static/assets/logo.png?v=v2.5.0" alt="SoulBot" width="112" height="112" decoding="async"><h2>管理员登录</h2><div class="field"><label for="username">用户名</label><input id="username" name="username" required autocomplete="username" maxlength="40"></div><div class="field"><label for="password">密码</label><input id="password" name="password" type="password" required autocomplete="current-password" maxlength="128"></div><div class="actions"><button class="button primary" type="submit">进入我的空间 ${icon('arrow')}</button></div><p class="note">管理会话有效期为 12 小时。忘记密码请参考 README.md；请勿把 data 目录分享给他人。</p></form>`);
+ page = 'login'; mount(`${heading('WELCOME BACK','欢迎回到你的小小宇宙。','登录管理员账户，继续照顾 SoulBot 的每一个细节。')}<form class="panel auth-panel" id="login-form"><img class="auth-logo" src="/static/assets/logo.png?v=v2.6.0" alt="SoulBot" width="112" height="112" decoding="async"><h2>管理员登录</h2><div class="field"><label for="username">用户名</label><input id="username" name="username" required autocomplete="username" maxlength="40"></div><div class="field"><label for="password">密码</label><input id="password" name="password" type="password" required autocomplete="current-password" maxlength="128"></div><div class="actions"><button class="button primary" type="submit">进入我的空间 ${icon('arrow')}</button></div><p class="note">管理会话有效期为 12 小时。忘记密码请参考 README.md；请勿把 data 目录分享给他人。</p></form>`);
  $('#login-form').onsubmit = e => {e.preventDefault();guarded(async () => {await send('/api/auth/login','POST',{username:$('#username').value,password:$('#password').value});$('#password').value='';await refresh();dirty=false;render(B.initialized ? 'dashboard' : 'setup');}, $('button[type=submit]'));};
 }
 async function refresh() {

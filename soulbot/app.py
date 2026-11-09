@@ -84,6 +84,8 @@ class SecretUpdate(Model):
     asr_fallback_1: SecretStr | None = None
     asr_fallback_2: SecretStr | None = None
     image_api_key: SecretStr | None = None
+    image_fallback_1: SecretStr | None = None
+    image_fallback_2: SecretStr | None = None
 
 
 class Progress(Model):

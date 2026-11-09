@@ -16,11 +16,12 @@ MAX_RESPONSE_BYTES = MAX_BASE64_CHARS + 65536
 class OpenAICompatibleImageProvider:
     capabilities = frozenset({"image_generation"})
 
-    def __init__(self, secrets):
+    def __init__(self, secrets, secret_name="image_api_key"):
         self.secrets, self.transport, self.last_success = secrets, None, 0
+        self.secret_name = secret_name
 
     async def generate(self, prompt, settings):
-        key = self.secrets.get("image_api_key")
+        key = self.secrets.get(self.secret_name)
         if not key or not settings.model.strip():
             raise ImageGenerationError("configuration", "请填写独立生图 Key 和模型 ID")
         body = {"model": settings.model, "prompt": prompt, "n": 1}
@@ -94,6 +95,10 @@ class OpenAICompatibleImageProvider:
                 ) from None
             self.last_success = time.time()
             return GeneratedImage(data, mime, width, height)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            raise ImageGenerationError(
+                "network", "未能连接生图服务，尚未提交生成请求", False
+            ) from None
         except (TimeoutError, httpx.TimeoutException):
             raise ImageGenerationError(
                 "timeout", "生图超时；服务商可能已计费，没有自动重试", True

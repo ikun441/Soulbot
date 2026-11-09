@@ -1,9 +1,14 @@
 import asyncio
+from typing import Literal
 
 from fastapi import Depends, HTTPException, Request
 
 from soulbot.services.config_service import ComfySettings
 from soulbot.tools.media_tools import GenerateImage
+
+
+class ImagePreview(GenerateImage):
+    provider_id: Literal["auto", "primary", "fallback_1", "fallback_2"] = "auto"
 
 
 def install_image_api(app, s, authorized):
@@ -15,6 +20,7 @@ def install_image_api(app, s, authorized):
             "enabled": s.config.current.image_generation.enabled,
             "configured": s.images.configured(),
             "provider_test": s.images.diagnostics(),
+            "routes": s.images.router.status(),
             "active": len(s.images.jobs),
             "usage": s.budget.summary(s.config.current)["image_generation"],
         }
@@ -24,8 +30,12 @@ def install_image_api(app, s, authorized):
         return await s.providers.resolve("image_generation", "comfyui").probe(data)
 
     @app.post("/api/image/generate", dependencies=protected)
-    async def generate(data: GenerateImage, request: Request):
-        task = asyncio.create_task(s.images.generate(data.prompt))
+    async def generate(data: ImagePreview, request: Request):
+        task = asyncio.create_task(
+            s.images.generate(
+                data.prompt, only=None if data.provider_id == "auto" else data.provider_id
+            )
+        )
 
         async def disconnected():
             while True:
@@ -43,7 +53,7 @@ def install_image_api(app, s, authorized):
             image = await task
             artifact = await asyncio.to_thread(s.media.save, image.data, "image_generation")
             s.db.audit("image_generated", "web_test")
-            return artifact
+            return {**artifact, "provider_id": image.provider_id, "provider": image.provider}
         finally:
             watcher.cancel()
             if not task.done():

@@ -17,6 +17,8 @@ class GeneratedImage:
     mime: str
     width: int
     height: int
+    provider_id: str = "primary"
+    provider: str = ""
 
 
 class ImageGenerationProvider(Protocol):

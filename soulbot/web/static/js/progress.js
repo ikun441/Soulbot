@@ -2,7 +2,7 @@
 export const milestones = [
  {id:'M0',name:'基础与管理',state:'已实现',href:'#setup',detail:'虚拟环境启动、首次向导、配置校验、原生 WebUI 与 SQLite。'},
  {id:'M1',name:'QQ 与 AI',state:'已实现',href:'#qq',detail:'NapCat 接入、群私聊、消息过滤、频率设置、工具调用和 LLM 备用模型。'},
- {id:'M2',name:'多模态',state:'已实现',href:'#meme',detail:'Emoji 分类、meme 与扩展模板、TTS/ASR 及备用路由、ComfyUI、生图、卡片及 QQ 图片理解。'},
+ {id:'M2',name:'多模态',state:'已实现',href:'#meme',detail:'Emoji 分类、meme 与扩展模板、TTS/ASR 及备用路由、ComfyUI、生图及备用路由、卡片及 QQ 图片理解。'},
  {id:'M3',name:'人格与记忆',state:'已实现',href:'#relationships',detail:'可编辑人格、全局情绪与好感关系、身份名录、统一记忆和模型记忆写入更新。'},
  {id:'M4',name:'自主行为',state:'已实现',href:'#proactive',detail:'授权主动联系、媒体草稿、群聊参与、日记周摘要、公开搜索与自主探索，支持搜索备用服务。'},
  {id:'M5',name:'QQ 空间',state:'已实现',href:'#qzone',detail:'文字与配图草稿、可选审批、自主发布、可见范围、持久频率及平台能力检测。'},
@@ -10,7 +10,7 @@ export const milestones = [
 ];
 export const pendingWork = [
  '视频与通用文件理解；加好友、入退群等高影响社交工具。',
- '生图的多 Provider 故障切换；非原生 Tool Calling 兼容层。',
+ '非原生 Tool Calling 兼容层。',
  '向量记忆、完整矛盾合并和遗忘；探索资料到知识、话题与社交的自动闭环。',
  '插件在线升级与回滚、操作系统级隔离；第三方 GPU/模型环境安装和通用服务守护。',
  'GitHub CI 正式启用、跨平台及长期稳定性验收、WebUI 一键更新回滚。',

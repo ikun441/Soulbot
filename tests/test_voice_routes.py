@@ -405,7 +405,7 @@ def test_schema_twenty_two_upgrade_preserves_existing_usage(tmp_path):
         db.execute("UPDATE metadata SET value='22' WHERE key='schema_version'")
     db = Database(services.db.path)
     Database(services.db.path)
-    assert db.get("schema_version") == "23"
+    assert db.get("schema_version") == "24"
     assert (
         services.budget.summary(services.config.current)["tts"]["recent"][0]["route_id"]
         == "primary"
@@ -464,7 +464,10 @@ def test_failed_cloud_attempt_keeps_own_price_and_never_reuses_backup_key(s):
     assert data[0]["status"] == "uncertain"
 
 
-def test_revoking_tts_tool_permission_before_backup_blocks_external_generation(tmp_path):
+@pytest.mark.parametrize("permission", ["deny", "approval"])
+def test_revoking_tts_tool_permission_before_backup_blocks_external_generation(
+    tmp_path, permission
+):
     services = build_services(tmp_path)
     cfg = services.config.current.tts
     cfg.enabled = True
@@ -473,12 +476,12 @@ def test_revoking_tts_tool_permission_before_backup_blocks_external_generation(t
 
     async def primary(*args):
         calls.append(True)
-        services.config.current.tools.synthesize_speech = "deny"
+        services.config.current.tools.synthesize_speech = permission
         raise SpeechError("network", "local fixture", True)
 
     services.providers.resolve("tts", "edge").synthesize = primary
     with pytest.raises(SpeechError, match="权限已关闭"):
-        asyncio.run(services.speech.synthesize("公开测试文字"))
+        asyncio.run(services.speech.synthesize("公开测试文字", "proactive_draft"))
     assert len(calls) == 1
 
 

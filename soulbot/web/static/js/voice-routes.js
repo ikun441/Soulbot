@@ -1,4 +1,4 @@
-import {providerStatusText} from './provider-guidance.js?v=v2.5.0';
+import {providerStatusText} from './provider-guidance.js?v=v2.6.0';
 const names={primary:'主服务',fallback_1:'备用服务 1',fallback_2:'备用服务 2'};
 export const voiceRouteName=id=>names[id]||'主服务';
 export function voiceRoutesForm(ctx,kind){

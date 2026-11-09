@@ -1,4 +1,4 @@
-import {createPageSession} from './page-session.js?v=v2.5.0';
+import {createPageSession} from './page-session.js?v=v2.6.0';
 
 let session=null;
 const $=selector=>document.querySelector(selector);

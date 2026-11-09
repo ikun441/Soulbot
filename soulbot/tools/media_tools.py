@@ -327,10 +327,9 @@ def specifications(s, event=None):
                 "name": tool.name,
                 "description": tool.description
                 + (
-                    " 当前为本地 ComfyUI，请把用户画面要求准确转换为简洁英文视觉提示词再调用；不要只把中文原文传给模型，不要改变主体（猫与猫娘不同）。"
+                    " 已配置本地 ComfyUI 候选，请把用户画面要求准确转换为简洁英文视觉提示词再调用；不要只把中文原文传给模型，不要改变主体（猫与猫娘不同）。"
                     if tool.name == "generate_image"
-                    and config.image_generation.provider == "comfyui"
-                    and config.image_generation.comfy.tool_prompt_language == "en"
+                    and s.images.needs_english()
                     else ""
                 ),
                 "parameters": compact(tool.schema.model_json_schema()),

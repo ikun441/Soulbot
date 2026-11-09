@@ -18,6 +18,8 @@ NAMES = {
     "asr_fallback_1": "SOULBOT_ASR_FALLBACK_1",
     "asr_fallback_2": "SOULBOT_ASR_FALLBACK_2",
     "image_api_key": "SOULBOT_IMAGE_API_KEY",
+    "image_fallback_1": "SOULBOT_IMAGE_FALLBACK_1",
+    "image_fallback_2": "SOULBOT_IMAGE_FALLBACK_2",
 }
 
 
